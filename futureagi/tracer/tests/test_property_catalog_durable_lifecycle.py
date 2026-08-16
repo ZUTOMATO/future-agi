@@ -39,6 +39,7 @@ from tracer.services.clickhouse.v2.property_catalog.durable_lifecycle import (
     SourceWindow,
     WorkspaceCatalogScope,
     _activation_state,
+    _decode_plan_scope,
     _uint,
 )
 from tracer.services.clickhouse.v2.property_catalog.models import SourceAdapter
@@ -768,6 +769,57 @@ def test_crash_restart_reuses_plan_cutoff_mode_token_and_checkpoint() -> None:
     )
 
 
+def test_incremental_resume_uses_checkpoint_instead_of_prior_lower_watermark() -> None:
+    clock = _Clock(INITIAL_UNTIL)
+    state = _State()
+    freezer = _Freezer(clock)
+    tokens = [TOKEN_A, TOKEN_B, TOKEN_C]
+    lifecycle = _lifecycle(
+        state=state,
+        clock=clock,
+        freezer=freezer,
+        tokens=tokens,
+    )
+    initial = lifecycle.prepare(
+        scope=_scope(),
+        mode=LifecycleRunMode.INITIAL_BACKFILL,
+        configured_bounds=_bounds(),
+    )
+    state.activate(initial, at=clock.current)
+    clock.current += timedelta(minutes=2)
+    incremental = lifecycle.prepare(
+        scope=_scope(),
+        mode=LifecycleRunMode.INCREMENTAL,
+        configured_bounds=_bounds(),
+    )
+    resume = _running_checkpoint(incremental)
+    state.reservation = PersistedReservation(
+        lease=incremental.lease,
+        status=ReservationStatus.DRAINING,
+    )
+    state.resumes = (resume,)
+    clock.current += timedelta(minutes=1)
+
+    restarted = lifecycle.prepare(
+        scope=_scope(),
+        mode=LifecycleRunMode.AUTO,
+        configured_bounds=_bounds(),
+    )
+
+    resumed = restarted.stream(
+        SourceAdapter.EVAL_CONFIG,
+        ManifestStreamRole.DEFINITIONS,
+    )
+    untouched = restarted.stream(
+        SourceAdapter.EVAL_TEMPLATE,
+        ManifestStreamRole.DEFINITIONS,
+    )
+    assert resumed.resume == resume
+    assert resumed.lower_watermark == ""
+    assert untouched.resume is None
+    assert untouched.lower_watermark
+
+
 def test_fenced_crash_recovers_terminal_revision_without_reopening_sources() -> None:
     clock = _Clock(INITIAL_UNTIL)
     state = _State()
@@ -838,6 +890,13 @@ def test_auto_schedule_selects_incremental_then_due_full_repair() -> None:
         mode=LifecycleRunMode.INITIAL_BACKFILL,
         configured_bounds=_bounds(),
     )
+    initial_system = next(
+        value
+        for value in initial.lease.build_plan.streams
+        if value.source_adapter is SourceAdapter.SYSTEM_MANIFEST
+    )
+    assert initial_system.source_cutoff_label == "initial_backfill_no_prior_active"
+    assert initial_system.source_version_fence == initial.scope.catalog_epoch
     state.activate(initial, at=clock.current)
     clock.current += timedelta(minutes=2)
 
@@ -847,6 +906,17 @@ def test_auto_schedule_selects_incremental_then_due_full_repair() -> None:
         configured_bounds=_bounds(),
     )
     assert incremental.mode is LifecycleRunMode.INCREMENTAL
+    incremental_system = next(
+        value
+        for value in incremental.lease.build_plan.streams
+        if value.source_adapter is SourceAdapter.SYSTEM_MANIFEST
+    )
+    assert incremental_system.source_cutoff_label == (
+        "incremental_prior_active_revision_plus_epoch"
+    )
+    assert incremental_system.source_version_fence == (
+        incremental.scope.catalog_epoch + initial.lease.catalog_revision
+    )
     state.activate(incremental, at=clock.current)
 
     clock.current = INITIAL_UNTIL + timedelta(hours=24)
@@ -860,6 +930,54 @@ def test_auto_schedule_selects_incremental_then_due_full_repair() -> None:
     assert repair.lifecycle_mode is CatalogLifecycleMode.FULL_REPAIR
     assert repair.lineage_anchor_revision == repair.lease.catalog_revision
     assert all(value.lower_watermark == "" for value in repair.streams)
+    repair_system = next(
+        value
+        for value in repair.lease.build_plan.streams
+        if value.source_adapter is SourceAdapter.SYSTEM_MANIFEST
+    )
+    assert repair_system.source_version_fence == (
+        repair.scope.catalog_epoch + incremental.lease.catalog_revision
+    )
+
+
+def test_decoder_accepts_legacy_incremental_system_revision_marker() -> None:
+    clock = _Clock(INITIAL_UNTIL)
+    state = _State()
+    lifecycle = _lifecycle(
+        state=state,
+        clock=clock,
+        freezer=_Freezer(clock),
+        tokens=[TOKEN_A, TOKEN_B],
+    )
+    initial = lifecycle.prepare(
+        scope=_scope(),
+        mode=LifecycleRunMode.INITIAL_BACKFILL,
+        configured_bounds=_bounds(),
+    )
+    state.activate(initial, at=clock.current)
+    clock.current += timedelta(minutes=2)
+    incremental = lifecycle.prepare(
+        scope=_scope(),
+        mode=LifecycleRunMode.INCREMENTAL,
+        configured_bounds=_bounds(),
+    )
+    legacy_streams = tuple(
+        replace(
+            stream,
+            source_cutoff_label="incremental_prior_active_revision",
+            source_version_fence=initial.lease.catalog_revision,
+        )
+        if stream.source_adapter is SourceAdapter.SYSTEM_MANIFEST
+        else stream
+        for stream in incremental.lease.build_plan.streams
+    )
+    legacy_plan = replace(incremental.lease.build_plan, streams=legacy_streams)
+
+    decoded = _decode_plan_scope(legacy_plan)
+
+    assert decoded.mode is LifecycleRunMode.INCREMENTAL
+    assert decoded.prior_active_revision == initial.lease.catalog_revision
+    assert decoded.cutoffs == incremental.cutoffs
 
 
 def test_two_successive_incremental_revisions_advance_frozen_cutoff() -> None:

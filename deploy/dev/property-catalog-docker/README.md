@@ -256,8 +256,69 @@ Qualification is not complete merely because containers are running. Require:
 - sparse and dense Kartik queries meet the semantic and latency matrix; and
 - the before/after inventory proves that no existing DEV table changed.
 
-Do not enable public reads or schedule registration in this Compose bundle.
-Those are deliberately absent even after a successful bootstrap.
+Do not enable public reads or schedule registration in the bootstrap Compose
+file. After the exact activation is qualified, the separately rendered
+steady-state overlay below may add only the dedicated reconciliation worker
+and its opt-in registrar. Public reads remain a separate backend deployment
+decision.
+
+## Post-activation steady state
+
+The initial operator credentials are intentionally removable after a one-shot
+qualification. If this catalog is approved for ongoing DEV testing, first run
+`provision_existing_steady.py` without `--execute`. It proves that the target
+already contains exactly the six catalog tables, that the supplied bootstrap
+activation is the active one, that no open or draining lifecycle reservation
+remains, and that the scoped identities/files are absent. A failed or expired
+reservation is rejected: create a fresh suffix-isolated DEV catalog instead of
+repairing ledger state in place.
+Execution only re-creates the source SELECT, catalog control-writer, catalog
+consumer-writer, catalog-ledger-reader, and PostgreSQL SELECT identities. It
+does not create or alter a table and does not write a source or catalog row.
+
+```bash
+ACTIVATION_SHA256='<exact 64-character active activation digest>'
+ROOT=/home/ubuntu/th7247-kartik-0816h
+
+python deploy/dev/property-catalog-docker/provision_existing_steady.py \
+  --suffix 0816h \
+  --bootstrap-activation-sha256 "$ACTIVATION_SHA256"
+
+TH7247_STEADY_ACK=TH7247_ENABLE_EXISTING_DEV_CATALOG_STEADY_STATE \
+python deploy/dev/property-catalog-docker/provision_existing_steady.py \
+  --suffix 0816h \
+  --bootstrap-activation-sha256 "$ACTIVATION_SHA256" \
+  --validity-days 7 \
+  --execute
+```
+
+Next render the second-stage overlay from the exact bootstrap Compose file.
+The renderer adds one worker polling only `property_catalog_dev_sidecar` with
+one activity/workflow slot and one registrar behind the `registrar` profile.
+It preserves loopback-only OTLP, `PROPERTY_CATALOG_READ_MODE=off`, the source
+database, the isolated target, credential split, runtime bind, and all
+container hardening.
+
+```bash
+python deploy/dev/property-catalog-docker/render_existing_steady.py \
+  --base-compose "$ROOT/compose.yaml" \
+  --bootstrap-activation-sha256 "$ACTIVATION_SHA256" \
+  --output "$ROOT/steady.compose.yaml"
+
+docker compose -f "$ROOT/compose.yaml" -f "$ROOT/steady.compose.yaml" \
+  config --quiet
+docker compose -f "$ROOT/compose.yaml" -f "$ROOT/steady.compose.yaml" \
+  up -d property-catalog-producer property-catalog-consumer \
+  property-catalog-control
+docker compose -f "$ROOT/compose.yaml" -f "$ROOT/steady.compose.yaml" \
+  --profile registrar run --rm property-catalog-registrar
+```
+
+Before declaring steady state healthy, trigger or wait for one 120-second
+revision and prove a new active activation, zero Kafka lag, no gap/poison
+ledger rows, and unchanged source-table fingerprints. Stop the worker and
+revoke the short-lived identities after the review window if the DEV rollout
+is not being kept.
 
 ## Stop and remove only the new project
 

@@ -137,7 +137,13 @@ class Command(BaseCommand):
         # Register schedules
         self.stdout.write(f"Registering {len(schedules)} schedules...")
 
-        await a_register_schedules(client, schedules)
+        # A scoped registration must not treat schedules outside its scope as
+        # orphans. Only a full registration owns the complete schedule set.
+        await a_register_schedules(
+            client,
+            schedules,
+            cleanup_orphans=not scoped_registration,
+        )
 
         self.stdout.write(
             self.style.SUCCESS(f"Successfully registered {len(schedules)} schedules")

@@ -8,7 +8,7 @@ requires final lifecycle evidence to be loaded back from durable storage.
 The build plan has ten streams and only one unsigned cutoff per stream.  The
 cutoffs are therefore assigned as a compact, versioned lifecycle document:
 
-* system definitions: prior active revision (or the explicit no-prior marker),
+* system definitions: epoch plus prior active revision (or the epoch no-prior marker),
 * five relational definition streams: the frozen PostgreSQL upper cutoff,
 * span definitions: the frozen span lower bound,
 * span hot values: the frozen span upper bound,
@@ -1719,16 +1719,25 @@ def _prepared(
             raise DurableLifecycleError("resume checkpoint inventory has duplicates")
         by_key[key] = checkpoint
     lower_by_role = _lower_watermarks(mode, active)
-    starts = tuple(
-        StreamStart(
-            source_adapter=stream.source_adapter,
-            role=stream.role,
-            producer_stream_id=stream.producer_stream_id,
-            lower_watermark=lower_by_role[(stream.source_adapter, stream.role)],
-            resume=by_key.get(stream.key),
+    starts: list[StreamStart] = []
+    for stream in lease.build_plan.streams:
+        resume = by_key.get(stream.key)
+        starts.append(
+            StreamStart(
+                source_adapter=stream.source_adapter,
+                role=stream.role,
+                producer_stream_id=stream.producer_stream_id,
+                # A persisted checkpoint already contains the exact starting
+                # watermark. Passing the prior-active lower bound as well is
+                # ambiguous and ReconcileRequest correctly rejects it.
+                lower_watermark=(
+                    ""
+                    if resume is not None
+                    else lower_by_role[(stream.source_adapter, stream.role)]
+                ),
+                resume=resume,
+            )
         )
-        for stream in lease.build_plan.streams
-    )
     if set(by_key) - {value.key for value in lease.build_plan.streams}:
         raise DurableLifecycleError(
             "checkpoint exists outside the immutable build plan"
@@ -1739,7 +1748,7 @@ def _prepared(
         lease=lease,
         cutoffs=cutoffs,
         prior_active=active,
-        streams=starts,
+        streams=tuple(starts),
         reservation_status=reservation_status,
         resumed=resumed,
     )
@@ -1800,11 +1809,18 @@ def _planned_streams(
     system_label = (
         f"{prefix}_no_prior_active"
         if prior_active_revision is None
-        else f"{prefix}_prior_active_revision"
+        else f"{prefix}_prior_active_revision_plus_epoch"
     )
-    system_value = (
-        scope.catalog_epoch if prior_active_revision is None else prior_active_revision
-    )
+    system_value = scope.catalog_epoch
+    if prior_active_revision is not None:
+        # The system manifest has no database timestamp, so its source version
+        # advances with catalog lineage. The previous encoding used the prior
+        # revision directly, which regressed below the initial epoch (for
+        # example epoch 5 -> prior revision 1) and made every unchanged system
+        # binding look stale/conflicting on the first incremental run.
+        system_value += prior_active_revision
+        if system_value >= 1 << 64:
+            raise DurableLifecycleError("system-manifest source version exceeds UInt64")
     values.append(
         BuildPlanStream(
             source_adapter=SourceAdapter.SYSTEM_MANIFEST,
@@ -1899,7 +1915,20 @@ def _decode_plan_scope(plan: RevisionBuildPlan) -> _DecodedPlanScope:
         raise DurableLifecycleError("persisted build plan has unresolved auto mode")
     expected_labels = _expected_labels(mode)
     for key, stream in by_role.items():
-        if stream.source_cutoff_label != expected_labels[key]:
+        expected = {expected_labels[key]}
+        if (
+            key
+            == (
+                SourceAdapter.SYSTEM_MANIFEST,
+                ManifestStreamRole.DEFINITIONS,
+            )
+            and mode is not LifecycleRunMode.INITIAL_BACKFILL
+        ):
+            # Read old, already-persisted plans so an in-flight rollout can be
+            # diagnosed/recovered after upgrading. New plans are emitted only
+            # with the monotonic plus-epoch encoding.
+            expected.add(f"{mode.value}_prior_active_revision")
+        if stream.source_cutoff_label not in expected:
             raise DurableLifecycleError(
                 f"build plan cutoff label is invalid for {key[0]}/{key[1]}"
             )
@@ -1942,11 +1971,20 @@ def _decode_plan_scope(plan: RevisionBuildPlan) -> _DecodedPlanScope:
             "build-plan source_scope differs from its stream cutoff window"
         )
     system = by_role[(SourceAdapter.SYSTEM_MANIFEST, ManifestStreamRole.DEFINITIONS)]
-    prior_revision = (
-        None
-        if system.source_cutoff_label == f"{mode.value}_no_prior_active"
-        else system.source_version_fence
-    )
+    if system.source_cutoff_label == f"{mode.value}_no_prior_active":
+        prior_revision = None
+    elif system.source_cutoff_label == (
+        f"{mode.value}_prior_active_revision_plus_epoch"
+    ):
+        prior_revision = system.source_version_fence - plan.catalog_epoch
+        if prior_revision < 1:
+            raise DurableLifecycleError(
+                "scheduled build plan has an invalid encoded prior revision"
+            )
+    else:
+        # Compatibility for plans persisted before the monotonic system-source
+        # version fix. This path is decode-only; _planned_streams never emits it.
+        prior_revision = system.source_version_fence
     if mode is LifecycleRunMode.INITIAL_BACKFILL and prior_revision is not None:
         raise DurableLifecycleError("initial build plan claims prior active state")
     if mode is not LifecycleRunMode.INITIAL_BACKFILL and prior_revision is None:
@@ -1969,7 +2007,7 @@ def _expected_labels(
             (SourceAdapter.SYSTEM_MANIFEST, ManifestStreamRole.DEFINITIONS): (
                 f"{prefix}_no_prior_active"
                 if mode is LifecycleRunMode.INITIAL_BACKFILL
-                else f"{prefix}_prior_active_revision"
+                else f"{prefix}_prior_active_revision_plus_epoch"
             ),
             (SourceAdapter.SPAN_ATTRIBUTE, ManifestStreamRole.DEFINITIONS): (
                 f"{prefix}_span_since_us"
@@ -1991,7 +2029,11 @@ def _expected_labels(
 def _label_suffixes(stream: BuildPlanStream) -> tuple[str, ...]:
     key = (stream.source_adapter, stream.role)
     if key == (SourceAdapter.SYSTEM_MANIFEST, ManifestStreamRole.DEFINITIONS):
-        return ("_no_prior_active", "_prior_active_revision")
+        return (
+            "_no_prior_active",
+            "_prior_active_revision_plus_epoch",
+            "_prior_active_revision",
+        )
     if stream.source_adapter in _RELATIONAL_ADAPTERS:
         return ("_postgres_until_us",)
     if stream.role is ManifestStreamRole.DEFINITIONS:
