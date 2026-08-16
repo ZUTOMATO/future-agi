@@ -25,6 +25,7 @@ import {
 const parseQueryMock = vi.fn();
 const dashboardFilterValuesMock = vi.hoisted(() => vi.fn());
 const exactAttributePropertiesMock = vi.hoisted(() => vi.fn());
+const propertyCatalogMock = vi.hoisted(() => vi.fn());
 
 const defaultDashboardFilterValues = () => ({
   data: [],
@@ -40,6 +41,16 @@ const defaultDashboardFilterValues = () => ({
 
 beforeEach(() => {
   dashboardFilterValuesMock.mockReturnValue(defaultDashboardFilterValues());
+  propertyCatalogMock.mockReturnValue({
+    error: {
+      response: {
+        status: 503,
+        data: { code: "property_catalog_not_ready" },
+      },
+    },
+    legacyFallbackRequired: true,
+    metrics: [],
+  });
   exactAttributePropertiesMock.mockReturnValue({
     data: [],
     isFetching: false,
@@ -93,8 +104,10 @@ vi.mock("src/hooks/use-ai-filter", () => ({
   }),
 }));
 
-vi.mock("src/hooks/useDashboards", () => ({
+vi.mock("src/hooks/useDashboards", async (importOriginal) => ({
+  ...(await importOriginal()),
   useDashboardFilterValues: dashboardFilterValuesMock,
+  usePropertyCatalog: propertyCatalogMock,
 }));
 
 vi.mock("../useExactTraceAttributeProperties", () => ({
@@ -110,6 +123,7 @@ function renderPanel({
   showQueryTab = false,
   projectId,
   source,
+  propertyNamespace,
   attributeSource,
   tab,
 }) {
@@ -130,6 +144,7 @@ function renderPanel({
         showQueryTab={showQueryTab}
         projectId={projectId}
         source={source}
+        propertyNamespace={propertyNamespace}
         attributeSource={attributeSource}
         tab={tab}
       />
@@ -216,6 +231,7 @@ describe("TraceFilterPanel AI apply (#577)", () => {
         fieldCategory: "system",
         fieldType: "string",
         apiColType: undefined,
+        registryId: "system_attribute:traces:status",
         operator: "in",
         value: ["ERROR"],
       },
@@ -267,6 +283,53 @@ describe("TraceFilterPanel AI apply: additive, empty, single-call", () => {
       field: "language",
       value: ["english"],
     });
+
+    document.body.removeChild(anchorEl);
+  });
+
+  it("uses property_id to disambiguate same-name AI fields", async () => {
+    parseQueryMock.mockResolvedValue([
+      {
+        field: "status",
+        property_id: "annotation:status",
+        operator: "is",
+        value: "Approved",
+      },
+    ]);
+    const { anchorEl, onApply } = renderPanel({
+      properties: [
+        {
+          id: "status",
+          name: "Status",
+          category: "system",
+          type: "string",
+          registryId: "system_attribute:traces:status",
+        },
+        {
+          id: "status",
+          name: "Review status",
+          category: "annotation",
+          type: "categorical",
+          apiColType: "ANNOTATION",
+          registryId: "annotation:status",
+        },
+      ],
+    });
+
+    const aiInput = screen.getByPlaceholderText(/Ask AI/i);
+    fireEvent.change(aiInput, { target: { value: "approved reviews" } });
+    fireEvent.keyDown(aiInput, { key: "Enter" });
+
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+    expect(onApply.mock.calls[0][0]).toEqual([
+      expect.objectContaining({
+        field: "status",
+        registryId: "annotation:status",
+        fieldCategory: "annotation",
+        apiColType: "ANNOTATION",
+        value: ["Approved"],
+      }),
+    ]);
 
     document.body.removeChild(anchorEl);
   });
@@ -1151,6 +1214,69 @@ describe("voice-call property parity", () => {
     );
   });
 
+  it("keeps supplied filterField category and registry identity", () => {
+    expect(
+      mergeTraceFilterProperties({
+        propertyNamespace: "users",
+        filterFields: [
+          {
+            id: "review_label",
+            name: "Review Label",
+            category: "annotation",
+            apiColType: "ANNOTATION",
+            registryId: "annotation:review-label-id",
+            type: "categorical",
+          },
+        ],
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        id: "review_label",
+        registryId: "annotation:review-label-id",
+        category: "annotation",
+        apiColType: "ANNOTATION",
+      }),
+    );
+  });
+
+  it("uses surface namespaces without changing the native value source", () => {
+    expect(
+      mergeTraceFilterProperties({ tab: "voiceCalls", source: "traces" }).find(
+        (property) => property.id === "ended_reason",
+      ),
+    ).toMatchObject({
+      registryId: "system_attribute:voice_calls:ended_reason",
+    });
+    expect(
+      mergeTraceFilterProperties({
+        source: "sessions",
+        propertyNamespace: "users",
+        filterFields: [{ id: "user_id", name: "User ID" }],
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        id: "user_id",
+        registryId: "system_attribute:users:user_id",
+      }),
+    );
+  });
+
+  it("keeps the Sessions property identity stable across native value aliases", () => {
+    expect(
+      mergeTraceFilterProperties({
+        source: "sessions",
+        filterFields: [{ id: "session_id", name: "Session ID" }],
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        id: "session_id",
+        registryId: "system_attribute:sessions:session",
+        category: "system",
+        apiColType: "SYSTEM_METRIC",
+      }),
+    );
+  });
+
   it("deduplicates dashboard system aliases while retaining raw attributes", () => {
     const merged = mergeTraceFilterProperties({
       tab: "voiceCalls",
@@ -1273,6 +1399,15 @@ describe("voice-call property parity", () => {
     expect(findTraceFilterProperty(merged, attributeRow)).toMatchObject({
       category: "attribute",
       apiColType: "SPAN_ATTRIBUTE",
+    });
+    expect(
+      findTraceFilterProperty(merged, {
+        field: "cost_cents",
+        registryId: "custom_attribute:cost_cents",
+      }),
+    ).toMatchObject({
+      registryId: "custom_attribute:cost_cents",
+      category: "attribute",
     });
     expect([
       buildApiFilterFromPanelRow(systemRow),
@@ -1457,13 +1592,19 @@ describe("exact manual attribute fallback", () => {
     });
 
     await waitFor(() =>
-      expect(getSpy).toHaveBeenCalledWith(endpoints.dashboard.metrics, {
-        params: expect.objectContaining({
-          project_ids: "project-whatfix",
-          per_eval_config: true,
-          exclude_custom_attributes: true,
+      expect(getSpy).toHaveBeenCalledWith(
+        endpoints.dashboard.metrics,
+        expect.objectContaining({
+          params: expect.objectContaining({
+            page: 1,
+            page_size: 200,
+            project_ids: "project-whatfix",
+            per_eval_config: true,
+            exclude_custom_attributes: true,
+          }),
+          signal: expect.any(AbortSignal),
         }),
-      }),
+      ),
     );
 
     expect(
@@ -1498,7 +1639,7 @@ describe("exact manual attribute fallback", () => {
     document.body.removeChild(anchorEl);
   });
 
-  it("decouples retained key discovery from session value semantics", () => {
+  it("routes session custom-attribute values through their trace fact store", () => {
     dashboardFilterValuesMock.mockClear();
     exactAttributePropertiesMock.mockClear();
     const finalStatus = {
@@ -1506,6 +1647,7 @@ describe("exact manual attribute fallback", () => {
       name: "final_status",
       category: "attribute",
       rawCategory: "custom_attribute",
+      registryId: "custom_attribute:final_status",
       type: "string",
       attributeTypes: ["string"],
       attributeTypesExact: false,
@@ -1539,7 +1681,7 @@ describe("exact manual attribute fallback", () => {
       expect.objectContaining({
         metricName: "final_status",
         metricType: "custom_attribute",
-        source: "sessions",
+        source: "traces",
       }),
     );
 
@@ -1554,6 +1696,7 @@ describe("exact manual attribute fallback", () => {
       name: "final_status",
       category: "attribute",
       rawCategory: "custom_attribute",
+      registryId: "custom_attribute:final_status",
       type: "string",
       attributeTypes: ["string"],
       attributeTypesExact: false,
@@ -1696,6 +1839,7 @@ describe("exact manual attribute fallback", () => {
       name: "final_status",
       category: "attribute",
       rawCategory: "custom_attribute",
+      registryId: "custom_attribute:final_status",
       type: "string",
       apiColType: "SPAN_ATTRIBUTE",
       isManualExactAttribute: true,
@@ -1736,6 +1880,7 @@ describe("exact manual attribute fallback", () => {
       name: "cost_cents",
       category: "attribute",
       rawCategory: "custom_attribute",
+      registryId: "custom_attribute:cost_cents",
       type: "string",
       apiColType: "SPAN_ATTRIBUTE",
       isManualExactAttribute: true,
@@ -2259,6 +2404,63 @@ describe("exact manual attribute fallback", () => {
 
     document.body.removeChild(anchorEl);
   });
+
+  it("loads the next bounded eval and annotation property page explicitly", async () => {
+    const getSpy = vi.spyOn(axios, "get").mockImplementation((url, config) => {
+      if (url !== endpoints.dashboard.metrics) {
+        return Promise.resolve({ data: { result: {} } });
+      }
+      const page = config?.params?.page || 1;
+      return Promise.resolve({
+        data: {
+          result: {
+            metrics: [],
+            page,
+            page_size: 200,
+            has_more: page === 1,
+          },
+        },
+      });
+    });
+
+    const { anchorEl } = renderPanel({
+      projectId: "project-whatfix",
+      source: "traces",
+    });
+
+    await waitFor(() =>
+      expect(getSpy).toHaveBeenCalledWith(
+        endpoints.dashboard.metrics,
+        expect.objectContaining({
+          params: expect.objectContaining({ page: 1, page_size: 200 }),
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Property" }));
+    const loadMore = await screen.findByRole("button", {
+      name: "Load more eval and annotation properties",
+    });
+    fireEvent.click(loadMore);
+
+    await waitFor(() =>
+      expect(getSpy).toHaveBeenCalledWith(
+        endpoints.dashboard.metrics,
+        expect.objectContaining({
+          params: expect.objectContaining({ page: 2, page_size: 200 }),
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", {
+          name: "Load more eval and annotation properties",
+        }),
+      ).not.toBeInTheDocument(),
+    );
+
+    document.body.removeChild(anchorEl);
+  });
 });
 
 describe("filter-value picker bounded-read UX", () => {
@@ -2495,7 +2697,16 @@ describe("filter-value picker bounded-read UX", () => {
   );
 
   it.each([
-    ["tracing", undefined, "traces", "provider", "Provider", "provider"],
+    [
+      "tracing",
+      undefined,
+      "traces",
+      "provider",
+      "Provider",
+      "provider",
+      "system_attribute:traces:provider",
+      undefined,
+    ],
     [
       "voice",
       "voiceCalls",
@@ -2503,8 +2714,29 @@ describe("filter-value picker bounded-read UX", () => {
       "ended_reason",
       "Ended Reason",
       "ended_reason",
+      "system_attribute:voice_calls:ended_reason",
+      undefined,
     ],
-    ["session", undefined, "sessions", "session_id", "Session ID", "session"],
+    [
+      "session",
+      undefined,
+      "sessions",
+      "session_id",
+      "Session ID",
+      "session",
+      "system_attribute:sessions:session",
+      undefined,
+    ],
+    [
+      "users",
+      undefined,
+      "sessions",
+      "user_id",
+      "User ID",
+      "user_id",
+      "system_attribute:users:user_id",
+      "users",
+    ],
   ])(
     "sends %s Basic system-value search to the cursor backend",
     async (
@@ -2514,6 +2746,8 @@ describe("filter-value picker bounded-read UX", () => {
       propertyId,
       propertyName,
       expectedMetricName,
+      expectedPropertyId,
+      propertyNamespace,
     ) => {
       const property = {
         id: propertyId,
@@ -2538,6 +2772,7 @@ describe("filter-value picker bounded-read UX", () => {
         projectId: `project-system-${_surface}`,
         source,
         tab,
+        propertyNamespace,
       });
 
       fireEvent.click(
@@ -2551,6 +2786,7 @@ describe("filter-value picker bounded-read UX", () => {
         () =>
           expect(dashboardFilterValuesMock).toHaveBeenCalledWith(
             expect.objectContaining({
+              propertyId: expectedPropertyId,
               metricName: expectedMetricName,
               metricType: "system_metric",
               pageSize: 10,
@@ -3014,6 +3250,49 @@ describe("filter-value picker bounded-read UX", () => {
     document.body.removeChild(anchorEl);
   });
 
+  it("retains an off-page attribute registry identity through Query editing", async () => {
+    dashboardFilterValuesMock.mockReturnValue({
+      ...defaultDashboardFilterValues(),
+      data: [{ value: "new", label: "new", type: "string" }],
+    });
+    const onApply = vi.fn();
+    const { anchorEl } = renderPanel({
+      currentFilters: [
+        {
+          field: "rare.attribute",
+          registryId: "custom_attribute:rare.attribute",
+          fieldName: "Rare attribute",
+          fieldCategory: "attribute",
+          fieldType: "string",
+          apiColType: "SPAN_ATTRIBUTE",
+          operator: "contains",
+          value: ["old"],
+          valueTypes: ["string"],
+        },
+      ],
+      // Deliberately absent from the current catalog page: the selected row
+      // itself is the only source of its stable identity.
+      properties: [],
+      onApply,
+      showQueryTab: true,
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Query" }));
+    fireEvent.click(await screen.findByText("Rare attribute contains old"));
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "new" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(onApply).toHaveBeenCalled());
+    expect(onApply.mock.calls.at(-1)[0][0]).toMatchObject({
+      field: "rare.attribute",
+      registryId: "custom_attribute:rare.attribute",
+      value: ["new"],
+    });
+
+    document.body.removeChild(anchorEl);
+  });
+
   it("preserves existing scalar zero and false values with their storage types", async () => {
     const onApply = vi.fn();
     const { anchorEl } = renderPanel({
@@ -3171,6 +3450,7 @@ describe("filter-value picker bounded-read UX", () => {
             ? [
                 {
                   id: "final_status",
+                  registryId: "custom_attribute:final_status",
                   name: "final_status",
                   category: "attribute",
                   rawCategory: "custom_attribute",
@@ -3250,6 +3530,7 @@ describe("filter-value picker bounded-read UX", () => {
     expect(onApply.mock.calls.at(-1)[0]).toEqual([
       expect.objectContaining({
         field: "final_status",
+        registryId: "custom_attribute:final_status",
         fieldCategory: "attribute",
         fieldType: "string",
         apiColType: "SPAN_ATTRIBUTE",
@@ -3288,6 +3569,7 @@ describe("filter-value picker bounded-read UX", () => {
     await waitFor(() =>
       expect(dashboardFilterValuesMock).toHaveBeenCalledWith(
         expect.objectContaining({
+          propertyId: "system_attribute:voice_calls:ended_reason",
           metricName: "ended_reason",
           metricType: "system_metric",
           pageSize: 10,
@@ -3313,6 +3595,41 @@ describe("filter-value picker bounded-read UX", () => {
         ),
       { timeout: 1_500 },
     );
+    document.body.removeChild(anchorEl);
+  });
+
+  it("uses the Sessions adapter identity for Query-tab Session ID values", async () => {
+    const { anchorEl } = renderPanel({
+      properties: [
+        {
+          id: "session_id",
+          name: "Session ID",
+          category: "system",
+          type: "string",
+          apiColType: "SYSTEM_METRIC",
+        },
+      ],
+      projectId: "project-sessions-query",
+      source: "sessions",
+      showQueryTab: true,
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Query" }));
+    await selectQueryPhaseOption("Session ID", "pick operator...");
+
+    await waitFor(() =>
+      expect(dashboardFilterValuesMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          propertyId: "system_attribute:sessions:session",
+          metricName: "session",
+          metricType: "system_metric",
+          pageSize: 10,
+          source: "sessions",
+          enabled: true,
+        }),
+      ),
+    );
+
     document.body.removeChild(anchorEl);
   });
 

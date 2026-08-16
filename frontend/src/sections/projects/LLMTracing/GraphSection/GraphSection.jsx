@@ -53,6 +53,33 @@ const deltaObject = {
   month: { months: 1 },
 };
 
+const GRAPH_PROPERTY_KIND = {
+  EVAL: "eval_config",
+  ANNOTATION: "annotation",
+};
+
+const withGraphPropertyIdentity = (config, selectedTab = "trace") => {
+  if (!config) return null;
+  const { propertyId, ...requestConfig } = config;
+  const prefix =
+    requestConfig.type === "SYSTEM_METRIC"
+      ? `system_attribute:${selectedTab === "spans" ? "spans" : "traces"}`
+      : GRAPH_PROPERTY_KIND[requestConfig.type];
+  const property_id =
+    requestConfig.type === "SYSTEM_METRIC" && requestConfig.id
+      ? `${prefix}:${requestConfig.id}`
+      : requestConfig.property_id || propertyId;
+  const canonicalPropertyId =
+    property_id ||
+    (prefix && requestConfig.id ? `${prefix}:${requestConfig.id}` : "");
+  if (!canonicalPropertyId) return requestConfig;
+  return {
+    ...requestConfig,
+    property_id: canonicalPropertyId,
+    source: "traces",
+  };
+};
+
 const GraphSection = ({
   selectedTab,
   filters,
@@ -145,8 +172,12 @@ const GraphSection = ({
   );
 
   const handleGraphConfigChange = (config) => {
-    setSelectedGraphConfig(config ? { ...config } : null);
+    setSelectedGraphConfig(withGraphPropertyIdentity(config, selectedTab));
   };
+  const graphRequestConfig = useMemo(
+    () => withGraphPropertyIdentity(selectedGraphConfig, selectedTab),
+    [selectedGraphConfig, selectedTab],
+  );
   const forceRefreshRef = useRef(false);
   const pollingRef = useRef(false);
   const pollingControllerRef = useRef(null);
@@ -180,11 +211,20 @@ const GraphSection = ({
         setAggregationPollingPaused(false);
       }
 
+      // Start the action clock before the first HTTP read. Pending-response
+      // polling consumes this same sub-ten-second budget; an explicit Refresh
+      // resets it through resetAggregationBudget().
+      pollingControllerRef.current.start();
+      pollingControllerRef.current.recordAttempt();
       const generation = requestGenerationRef.current;
       return awaitAggregationRequestWithDeadline(request, {
-        timeoutMs: AGGREGATION_REQUEST_TIMEOUT_MS,
+        timeoutMs: pollingControllerRef.current.remainingMs(
+          AGGREGATION_REQUEST_TIMEOUT_MS,
+        ),
         signal,
         isCurrent: () => generation === requestGenerationRef.current,
+        onTimeout: () =>
+          pollingControllerRef.current.terminate("action_deadline"),
       });
     },
     [],
@@ -240,10 +280,9 @@ const GraphSection = ({
       selectedInterval,
       selectedGraphEvals,
       combinedFilters,
-      selectedGraphConfig,
+      graphRequestConfig,
     ],
     queryFn: async ({ queryKey, signal }) => {
-      pollingControllerRef.current.recordAttempt();
       const refresh = forceRefreshRef.current;
       forceRefreshRef.current = false;
       let response;
@@ -258,7 +297,7 @@ const GraphSection = ({
                 interval: selectedInterval,
                 filters: toBackendFilters(combinedFilters),
                 property: "average",
-                req_data_config: selectedGraphConfig,
+                req_data_config: graphRequestConfig,
                 project_id: observeId,
               },
               {
@@ -339,10 +378,9 @@ const GraphSection = ({
       selectedInterval,
       selectedGraphEvals,
       combinedFilters,
-      selectedGraphConfig,
+      graphRequestConfig,
     ],
     queryFn: async ({ queryKey, signal }) => {
-      pollingControllerRef.current.recordAttempt();
       const refresh = forceRefreshRef.current;
       forceRefreshRef.current = false;
       let response;
@@ -357,7 +395,7 @@ const GraphSection = ({
                 interval: selectedInterval,
                 filters: toBackendFilters(combinedFilters),
                 property: "average",
-                req_data_config: selectedGraphConfig,
+                req_data_config: graphRequestConfig,
                 project_id: observeId,
               },
               {

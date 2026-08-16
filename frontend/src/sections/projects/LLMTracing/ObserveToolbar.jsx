@@ -123,6 +123,16 @@ const ObserveToolbar = ({
   // remains `trace`, but the visible rows and list endpoint use the canonical
   // voice-call field contract.
   const effectiveFilterTab = isSimulator ? "voiceCalls" : tab;
+  const propertyNamespace =
+    effectiveFilterTab === "voiceCalls"
+      ? "voice_calls"
+      : mode === "sessions"
+        ? "sessions"
+        : mode === "users"
+          ? "users"
+          : "traces";
+  const filterValueSource =
+    mode === "sessions" || mode === "users" ? "sessions" : "traces";
   const setFilterButtonNode = useCallback((node) => {
     filterButtonRef.current = node;
     setFilterButtonEl(node);
@@ -268,6 +278,7 @@ const ObserveToolbar = ({
       })();
       return {
         field: gf.column_id,
+        registryId: gf.property_id,
         fieldName:
           gf.display_name || (isGlobalAnnotatorFilter ? "Annotator" : null),
         fieldCategory: isDirectIdFilter
@@ -429,7 +440,8 @@ const ObserveToolbar = ({
             tab={effectiveFilterTab}
             isSimulator={isSimulator}
             isSpansView={isSpansView}
-            source={mode === "sessions" ? "sessions" : "traces"}
+            source={filterValueSource}
+            propertyNamespace={propertyNamespace}
             projectId={projectId}
             onApply={(newFilters) => {
               setPanelFilters(newFilters);

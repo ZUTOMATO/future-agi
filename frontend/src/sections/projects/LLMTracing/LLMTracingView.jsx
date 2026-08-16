@@ -186,6 +186,7 @@ import SelectAllBanner from "./SelectAllBanner";
 import { getSelectionCountState } from "./listTotalMetadata";
 import { spanSourceIdsFromPhysicalRowIds } from "./spanPhysicalIdentity";
 import { normalizeVoiceCallSavedFilters } from "./voiceCallFilterFields";
+import { serializeTraceFiltersForPersistence } from "./filterPersistence";
 import useProjectFilterField from "../UsersView/useProjectFilterField";
 import FilterChips from "./FilterChips";
 import { useDashboardFilterValues } from "src/hooks/useDashboards";
@@ -2563,27 +2564,23 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
           : primarySpanDateFilter,
       ...(columnState ? { columnState } : {}),
     };
-    const mapFilters = (filters) =>
-      (filters || []).map((f) => ({
-        column_id: f.column_id,
-        filter_config: f.filter_config,
-      }));
     const config = {
       display: currentDisplay,
-      filters: mapFilters(
+      filters: serializeTraceFiltersForPersistence(
         selectedTab === "trace" ? primaryTraceFilters : primarySpanFilters,
       ),
-      extra_filters: extraFilters || [],
+      extra_filters: serializeTraceFiltersForPersistence(extraFilters),
     };
     if (showCompare) {
-      config.compare_filters = mapFilters(
+      config.compare_filters = serializeTraceFiltersForPersistence(
         selectedTab === "trace" ? compareTraceFilters : compareSpansFilters,
       );
       config.compare_date_filter =
         selectedTab === "trace"
           ? compareTraceDateFilter
           : compareSpansDateFilter;
-      config.compare_extra_filters = compareExtraFilters || [];
+      config.compare_extra_filters =
+        serializeTraceFiltersForPersistence(compareExtraFilters);
     }
     return config;
   }, [
@@ -3342,21 +3339,17 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
               });
             } else {
               try {
-                const mapFilters = (filters) =>
-                  (filters || []).map((f) => ({
-                    column_id: f.column_id,
-                    filter_config: f.filter_config,
-                  }));
                 localStorage.setItem(
                   filtersStorageKey,
                   JSON.stringify({
                     tabType: selectedTab,
-                    filters: mapFilters(
+                    filters: serializeTraceFiltersForPersistence(
                       selectedTab === "trace"
                         ? primaryTraceFilters
                         : primarySpanFilters,
                     ),
-                    extra_filters: extraFilters || [],
+                    extra_filters:
+                      serializeTraceFiltersForPersistence(extraFilters),
                   }),
                 );
               } catch {
@@ -3413,22 +3406,17 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                   });
                 } else {
                   try {
-                    const mapFilters = (filters) =>
-                      (filters || []).map((f) => ({
-                        column_id: f.column_id,
-                        filter_config: f.filter_config,
-                      }));
                     localStorage.setItem(
                       filtersStorageKey,
                       JSON.stringify({
                         tabType: selectedTab,
                         showCompare: true,
-                        filters: mapFilters(
+                        filters: serializeTraceFiltersForPersistence(
                           selectedTab === "trace"
                             ? primaryTraceFilters
                             : primarySpanFilters,
                         ),
-                        compare_filters: mapFilters(
+                        compare_filters: serializeTraceFiltersForPersistence(
                           selectedTab === "trace"
                             ? compareTraceFilters
                             : compareSpansFilters,
@@ -3437,8 +3425,12 @@ const LLMTracingView = ({ mode = "project", userIdForUserMode = null }) => {
                           selectedTab === "trace"
                             ? compareTraceDateFilter
                             : compareSpansDateFilter,
-                        extra_filters: extraFilters || [],
-                        compare_extra_filters: compareExtraFilters || [],
+                        extra_filters:
+                          serializeTraceFiltersForPersistence(extraFilters),
+                        compare_extra_filters:
+                          serializeTraceFiltersForPersistence(
+                            compareExtraFilters,
+                          ),
                       }),
                     );
                   } catch {
