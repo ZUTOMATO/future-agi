@@ -13,6 +13,7 @@ import TraceFilterPanel, {
   mergeTraceFilterProperties,
   mergeRetainedAttributeProperties,
   normalizeFilterRowOperator,
+  PropertyPickerPaginationControl,
   shouldUseRetainedAttributePages,
   toStaticFilterProperty,
 } from "../TraceFilterPanel";
@@ -93,6 +94,39 @@ describe("JSON array picker value identity", () => {
         Number.NaN,
       ]),
     ).toEqual([true, 1, "1", false, 0, 7, "text"]);
+  });
+});
+
+describe("PropertyPickerPaginationControl", () => {
+  it("advances both property inventories through one single-flight action", () => {
+    const loadAttributes = vi.fn(() => new Promise(() => {}));
+    const loadCatalog = vi.fn(() => new Promise(() => {}));
+
+    render(
+      <PropertyPickerPaginationControl
+        search=""
+        attributePageAvailable
+        isFetchingAttributePage={false}
+        attributePageError={false}
+        onLoadMoreAttributes={loadAttributes}
+        catalogPageAvailable
+        isFetchingCatalogPage={false}
+        catalogPageError={false}
+        onLoadMoreCatalog={loadCatalog}
+      />,
+    );
+
+    const loadMore = screen.getByRole("button", {
+      name: "Load more properties",
+    });
+    expect(
+      screen.getAllByRole("button", { name: "Load more properties" }),
+    ).toHaveLength(1);
+    fireEvent.click(loadMore);
+    fireEvent.click(loadMore);
+
+    expect(loadAttributes).toHaveBeenCalledOnce();
+    expect(loadCatalog).toHaveBeenCalledOnce();
   });
 });
 
@@ -2405,7 +2439,7 @@ describe("exact manual attribute fallback", () => {
     document.body.removeChild(anchorEl);
   });
 
-  it("loads the next bounded eval and annotation property page explicitly", async () => {
+  it("loads the next bounded catalog page through the unified control", async () => {
     const getSpy = vi.spyOn(axios, "get").mockImplementation((url, config) => {
       if (url !== endpoints.dashboard.metrics) {
         return Promise.resolve({ data: { result: {} } });
@@ -2439,7 +2473,7 @@ describe("exact manual attribute fallback", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Property" }));
     const loadMore = await screen.findByRole("button", {
-      name: "Load more eval and annotation properties",
+      name: "Load more properties",
     });
     fireEvent.click(loadMore);
 
@@ -2454,7 +2488,7 @@ describe("exact manual attribute fallback", () => {
     await waitFor(() =>
       expect(
         screen.queryByRole("button", {
-          name: "Load more eval and annotation properties",
+          name: "Load more properties",
         }),
       ).not.toBeInTheDocument(),
     );

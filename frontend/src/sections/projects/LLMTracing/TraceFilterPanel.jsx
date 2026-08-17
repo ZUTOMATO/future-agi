@@ -1285,6 +1285,109 @@ export function shouldUseRetainedAttributePages({
   );
 }
 
+export function PropertyPickerPaginationControl({
+  search,
+  attributePageAvailable,
+  attributeSearchContinuation,
+  isFetchingAttributePage,
+  attributePageError,
+  onLoadMoreAttributes,
+  catalogPageAvailable,
+  isFetchingCatalogPage,
+  catalogPageError,
+  onLoadMoreCatalog,
+}) {
+  const activeRequestRef = useRef(null);
+  const loading = isFetchingAttributePage || isFetchingCatalogPage;
+
+  const handleLoadMore = useCallback(() => {
+    if (loading || activeRequestRef.current) return;
+
+    const actions = [];
+    if (attributePageAvailable && onLoadMoreAttributes) {
+      actions.push(onLoadMoreAttributes);
+    }
+    if (catalogPageAvailable && onLoadMoreCatalog) {
+      actions.push(onLoadMoreCatalog);
+    }
+    if (actions.length === 0) return;
+
+    const actionResults = actions.map((action) => {
+      try {
+        const result = action();
+        return Promise.resolve(result);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    });
+    const request = Promise.allSettled(actionResults);
+    activeRequestRef.current = request;
+    const clearRequest = () => {
+      if (activeRequestRef.current === request) {
+        activeRequestRef.current = null;
+      }
+    };
+    request.then(clearRequest, clearRequest);
+  }, [
+    attributePageAvailable,
+    catalogPageAvailable,
+    loading,
+    onLoadMoreAttributes,
+    onLoadMoreCatalog,
+  ]);
+
+  if (loading) {
+    return (
+      <Box
+        role="status"
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 0.75,
+          py: 1,
+        }}
+      >
+        <CircularProgress size={14} />
+        <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
+          Loading more properties…
+        </Typography>
+      </Box>
+    );
+  }
+  if (!attributePageAvailable && !catalogPageAvailable) return null;
+
+  const unifiedCatalogLabel = catalogPageAvailable;
+  const retrying = attributePageError || catalogPageError;
+  const searching = Boolean(
+    search.trim() && (catalogPageAvailable || attributeSearchContinuation),
+  );
+  const label = retrying
+    ? unifiedCatalogLabel
+      ? "Retry loading properties"
+      : "Retry loading attributes"
+    : searching
+      ? unifiedCatalogLabel
+        ? "Continue searching properties"
+        : "Continue searching attributes"
+      : unifiedCatalogLabel
+        ? "Load more properties"
+        : "Load more attributes";
+
+  return (
+    <Box sx={{ display: "flex", justifyContent: "center", py: 0.5 }}>
+      <Button
+        data-filter-property-load-more
+        size="small"
+        onClick={handleLoadMore}
+        sx={{ fontSize: 11 }}
+      >
+        {label}
+      </Button>
+    </Box>
+  );
+}
+
 function PropertyPicker({
   anchorEl,
   open,
@@ -1442,6 +1545,7 @@ function PropertyPicker({
   const catalogCategoryCanContinue = ["all", "eval", "annotation"].includes(
     category,
   );
+  const attributeCategoryCanContinue = ["all", "attribute"].includes(category);
   const catalogSearchAlreadyMatched = Boolean(
     search.trim() && filtered.length > 0,
   );
@@ -1454,7 +1558,11 @@ function PropertyPicker({
   // A successful exact probe stops only that supplemental chain. The retained
   // catalog remains explicitly pageable so sibling substring matches can be
   // discovered without automatically draining it.
-  const canLoadNextAttributePage = hasNextAttributePage;
+  const canLoadNextAttributePage = Boolean(
+    hasNextAttributePage ||
+      (search.trim() &&
+        (hasNextExactAttributePage || hasSettledExactAttributeError)),
+  );
   const exactAttributeDiscoveryTerminal =
     exactAttributeCursorRetryExhausted ||
     exactAttributeBrowseStatus === "exhausted" ||
@@ -1508,9 +1616,18 @@ function PropertyPicker({
     request: fetchNextExactAttributePage,
   });
   const loadNextVisibleAttributePage =
-    search.trim() && hasNextExactAttributePage
+    search.trim() &&
+    (hasNextExactAttributePage || hasSettledExactAttributeError)
       ? loadNextExactAttributePage
       : loadNextAttributePage;
+  const attributePageAvailable =
+    attributeCategoryCanContinue && canLoadNextAttributePage;
+  const catalogPageAvailable =
+    shouldShowCatalogContinuation && hasNextCatalogPage;
+  const isFetchingVisibleAttributePage = Boolean(
+    attributeCategoryCanContinue &&
+      (isFetchingNextAttributePage || isFetchingNextExactPage),
+  );
   useEffect(() => {
     const settledSearch = search.trim();
     if (
@@ -1948,23 +2065,6 @@ function PropertyPicker({
                   />
                 </Box>
               )}
-              {isFetchingNextAttributePage && (
-                <Box
-                  role="status"
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 0.75,
-                    py: 1,
-                  }}
-                >
-                  <CircularProgress size={14} />
-                  <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
-                    Searching more attributes…
-                  </Typography>
-                </Box>
-              )}
               {hasAttributePageError && !isFetchingNextAttributePage && (
                 <Typography
                   role="status"
@@ -1992,64 +2092,25 @@ function PropertyPicker({
                   </Button>
                 </Box>
               )}
-              {hiddenCount === 0 &&
-                canLoadNextAttributePage &&
-                !isFetchingNextAttributePage && (
-                  <Box
-                    sx={{ display: "flex", justifyContent: "center", py: 0.5 }}
-                  >
-                    <Button
-                      data-filter-property-load-more
-                      size="small"
-                      onClick={loadNextVisibleAttributePage}
-                      sx={{ fontSize: 11 }}
-                    >
-                      {hasAttributePageError
-                        ? hasNextExactAttributePage
-                          ? "Retry searching attributes"
-                          : "Retry loading attributes"
-                        : hasNextExactAttributePage
-                          ? "Continue searching attributes"
-                          : "Load more attributes"}
-                    </Button>
-                  </Box>
-                )}
-              {hasNextCatalogPage &&
-                shouldShowCatalogContinuation &&
-                !isFetchingNextCatalogPage && (
-                  <Box
-                    sx={{ display: "flex", justifyContent: "center", py: 0.5 }}
-                  >
-                    <Button
-                      data-filter-property-load-more-catalog
-                      size="small"
-                      onClick={() => loadNextCatalogPage?.()}
-                      sx={{ fontSize: 11 }}
-                    >
-                      {catalogNextPageError
-                        ? "Retry loading properties"
-                        : search.trim()
-                          ? "Continue searching eval and annotation properties"
-                          : "Load more eval and annotation properties"}
-                    </Button>
-                  </Box>
-                )}
-              {shouldShowCatalogContinuation && isFetchingNextCatalogPage && (
-                <Box
-                  role="status"
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 0.75,
-                    py: 1,
-                  }}
-                >
-                  <CircularProgress size={14} />
-                  <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
-                    Loading more properties…
-                  </Typography>
-                </Box>
+              {hiddenCount === 0 && (
+                <PropertyPickerPaginationControl
+                  search={search}
+                  attributePageAvailable={attributePageAvailable}
+                  attributeSearchContinuation={Boolean(
+                    search.trim() &&
+                      (hasNextExactAttributePage ||
+                        hasSettledExactAttributeError),
+                  )}
+                  isFetchingAttributePage={isFetchingVisibleAttributePage}
+                  attributePageError={hasAttributePageError}
+                  onLoadMoreAttributes={loadNextVisibleAttributePage}
+                  catalogPageAvailable={catalogPageAvailable}
+                  isFetchingCatalogPage={
+                    shouldShowCatalogContinuation && isFetchingNextCatalogPage
+                  }
+                  catalogPageError={catalogNextPageError}
+                  onLoadMoreCatalog={loadNextCatalogPage}
+                />
               )}
               {hiddenCount > 0 && (
                 <Typography
