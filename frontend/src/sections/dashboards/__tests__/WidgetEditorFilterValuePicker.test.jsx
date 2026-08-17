@@ -42,7 +42,7 @@ describe("WidgetEditor filter-value picker", () => {
     );
 
     const loadMore = screen.getByRole("button", {
-      name: "Load more properties",
+      name: "Load more",
     });
     fireEvent.click(loadMore);
     fireEvent.click(loadMore);
@@ -56,9 +56,7 @@ describe("WidgetEditor filter-value picker", () => {
         onLoadMore={fetchNextPage}
       />,
     );
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Loading more properties",
-    );
+    expect(screen.getByRole("status")).toHaveTextContent("Loading more");
 
     rerender(
       <WidgetCatalogPaginationControl
@@ -69,8 +67,55 @@ describe("WidgetEditor filter-value picker", () => {
       />,
     );
     expect(
-      screen.queryByRole("button", { name: "Load more properties" }),
+      screen.queryByRole("button", { name: "Load more" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("advances both All-category cursors through one single-flight action", () => {
+    const fetchNextPage = vi.fn(() => new Promise(() => {}));
+    const fetchNextAttributePage = vi.fn(() => new Promise(() => {}));
+    render(
+      <WidgetCatalogPaginationControl
+        pickerCategory="all"
+        hasNextPage
+        isFetchingNextPage={false}
+        onLoadMore={fetchNextPage}
+        attributeHasNextPage
+        isFetchingAttributeNextPage={false}
+        onLoadMoreAttributes={fetchNextAttributePage}
+      />,
+    );
+
+    const loadMore = screen.getByRole("button", { name: "Load more" });
+    expect(screen.getAllByRole("button", { name: "Load more" })).toHaveLength(
+      1,
+    );
+    fireEvent.click(loadMore);
+    fireEvent.click(loadMore);
+
+    expect(fetchNextPage).toHaveBeenCalledOnce();
+    expect(fetchNextAttributePage).toHaveBeenCalledOnce();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading more");
+  });
+
+  it("advances only the trace-attribute cursor in its category", () => {
+    const fetchNextPage = vi.fn();
+    const fetchNextAttributePage = vi.fn(() => new Promise(() => {}));
+    render(
+      <WidgetCatalogPaginationControl
+        pickerCategory="custom_attribute"
+        hasNextPage
+        isFetchingNextPage={false}
+        onLoadMore={fetchNextPage}
+        attributeHasNextPage
+        isFetchingAttributeNextPage={false}
+        onLoadMoreAttributes={fetchNextAttributePage}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(fetchNextPage).not.toHaveBeenCalled();
+    expect(fetchNextAttributePage).toHaveBeenCalledOnce();
   });
 
   it("offers only properties supported by the selected widget adapters", () => {

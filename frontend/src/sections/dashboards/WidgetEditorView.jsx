@@ -399,29 +399,59 @@ export function WidgetCatalogPaginationControl({
   hasNextPage,
   isFetchingNextPage,
   onLoadMore,
+  attributeHasNextPage = false,
+  isFetchingAttributeNextPage = false,
+  onLoadMoreAttributes,
 }) {
   const activeRequestRef = useRef(null);
+  const [isRequestPending, setIsRequestPending] = useState(false);
+  const catalogPageAvailable =
+    pickerCategory !== "custom_attribute" && hasNextPage;
+  const attributePageAvailable =
+    (pickerCategory === "all" || pickerCategory === "custom_attribute") &&
+    attributeHasNextPage;
+  const loading =
+    isRequestPending || isFetchingNextPage || isFetchingAttributeNextPage;
+
   const handleLoadMore = useCallback(() => {
-    if (
-      pickerCategory === "custom_attribute" ||
-      !hasNextPage ||
-      isFetchingNextPage ||
-      activeRequestRef.current
-    ) {
+    if (loading || activeRequestRef.current) {
       return;
     }
-    const request = Promise.resolve(onLoadMore());
+
+    const actions = [];
+    if (catalogPageAvailable && onLoadMore) actions.push(onLoadMore);
+    if (attributePageAvailable && onLoadMoreAttributes) {
+      actions.push(onLoadMoreAttributes);
+    }
+    if (actions.length === 0) return;
+
+    setIsRequestPending(true);
+    const request = Promise.allSettled(
+      actions.map((action) => {
+        try {
+          return Promise.resolve(action());
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }),
+    );
     activeRequestRef.current = request;
     const clearRequest = () => {
       if (activeRequestRef.current === request) {
         activeRequestRef.current = null;
+        setIsRequestPending(false);
       }
     };
     request.then(clearRequest, clearRequest);
-  }, [hasNextPage, isFetchingNextPage, onLoadMore, pickerCategory]);
+  }, [
+    attributePageAvailable,
+    catalogPageAvailable,
+    loading,
+    onLoadMore,
+    onLoadMoreAttributes,
+  ]);
 
-  if (pickerCategory === "custom_attribute") return null;
-  if (isFetchingNextPage) {
+  if (loading) {
     return (
       <Box
         role="status"
@@ -435,17 +465,17 @@ export function WidgetCatalogPaginationControl({
       >
         <CircularProgress size={16} />
         <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
-          Loading more properties…
+          Loading more…
         </Typography>
       </Box>
     );
   }
-  if (!hasNextPage) return null;
+  if (!catalogPageAvailable && !attributePageAvailable) return null;
 
   return (
     <Box sx={{ py: 0.75, textAlign: "center" }}>
       <Button size="small" onClick={handleLoadMore} sx={{ fontSize: 11 }}>
-        Load more properties
+        Load more
       </Button>
     </Box>
   );
@@ -456,6 +486,9 @@ WidgetCatalogPaginationControl.propTypes = {
   hasNextPage: PropTypes.bool,
   isFetchingNextPage: PropTypes.bool,
   onLoadMore: PropTypes.func.isRequired,
+  attributeHasNextPage: PropTypes.bool,
+  isFetchingAttributeNextPage: PropTypes.bool,
+  onLoadMoreAttributes: PropTypes.func,
 };
 
 const DATASET_WIDGET_DIMENSIONS = new Set([
@@ -7418,6 +7451,15 @@ export default function WidgetEditorView() {
                   hasNextPage={hasNextPage}
                   isFetchingNextPage={isFetchingNextPage}
                   onLoadMore={fetchNextPage}
+                  attributeHasNextPage={
+                    cursorAttributePickerActive &&
+                    cursorAttributeControlProps.hasNextPage
+                  }
+                  isFetchingAttributeNextPage={
+                    cursorAttributePickerActive &&
+                    cursorAttributeControlProps.isFetchingNextPage
+                  }
+                  onLoadMoreAttributes={cursorAttributeControlProps.onLoadMore}
                 />
                 {cursorAttributePickerActive && (
                   <Box sx={{ px: 1.5, pb: 1.5 }}>
@@ -7425,6 +7467,7 @@ export default function WidgetEditorView() {
                       {...cursorAttributeControlProps}
                       search={pickerSearch}
                       showSearch={false}
+                      showLoadMore={false}
                     />
                   </Box>
                 )}
