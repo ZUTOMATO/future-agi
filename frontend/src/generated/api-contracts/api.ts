@@ -58677,6 +58677,7 @@ Query Parameters:
 - search: search string to filter run tests by name
 - limit: number of items per page (default: 10)
 - page: page number (default: 1)
+- summary: return the bounded list-card representation
  */
 export const simulateApiRunTestsList = async (
   params?: SimulateApiRunTestsListParams,
@@ -59997,6 +59998,7 @@ Query Parameters:
     'agent_definition' or 'prompt')
 - prompt_template_id: filter by prompt template ID (used when
     simulation_type is 'prompt')
+- summary: return the bounded list-card representation
  */
 export const simulateRunTestsList = async (
   params?: SimulateRunTestsListParams,

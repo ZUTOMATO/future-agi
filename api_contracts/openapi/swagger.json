@@ -50520,7 +50520,7 @@
         "/simulate/api/run-tests/": {
             "get": {
                 "operationId": "simulate_api_run-tests_list",
-                "description": "Get paginated list of run tests for the user's organization\nQuery Parameters:\n- search: search string to filter run tests by name\n- limit: number of items per page (default: 10)\n- page: page number (default: 1)",
+                "description": "Get paginated list of run tests for the user's organization\nQuery Parameters:\n- search: search string to filter run tests by name\n- limit: number of items per page (default: 10)\n- page: page number (default: 1)\n- summary: return the bounded list-card representation",
                 "parameters": [
                     {
                         "name": "search",
@@ -50564,6 +50564,14 @@
                         "type": "integer",
                         "maximum": 100,
                         "minimum": 1
+                    },
+                    {
+                        "name": "summary",
+                        "in": "query",
+                        "description": "Return the bounded list-card representation instead of the full nested run-test detail payload.",
+                        "required": false,
+                        "type": "boolean",
+                        "default": false
                     }
                 ],
                 "responses": {
@@ -51568,7 +51576,7 @@
         "/simulate/run-tests/": {
             "get": {
                 "operationId": "simulate_run-tests_list",
-                "description": "Get paginated list of run tests for the user's organization\nQuery Parameters:\n- search: search string to filter run tests by name\n- limit: number of items per page (default: 10)\n- page: page number (default: 1)\n- simulation_type: filter by source type (RunTest.SourceTypes values:\n    'agent_definition' or 'prompt')\n- prompt_template_id: filter by prompt template ID (used when\n    simulation_type is 'prompt')",
+                "description": "Get paginated list of run tests for the user's organization\nQuery Parameters:\n- search: search string to filter run tests by name\n- limit: number of items per page (default: 10)\n- page: page number (default: 1)\n- simulation_type: filter by source type (RunTest.SourceTypes values:\n    'agent_definition' or 'prompt')\n- prompt_template_id: filter by prompt template ID (used when\n    simulation_type is 'prompt')\n- summary: return the bounded list-card representation",
                 "parameters": [
                     {
                         "name": "search",
@@ -51612,6 +51620,14 @@
                         "type": "integer",
                         "maximum": 100,
                         "minimum": 1
+                    },
+                    {
+                        "name": "summary",
+                        "in": "query",
+                        "description": "Return the bounded list-card representation instead of the full nested run-test detail payload.",
+                        "required": false,
+                        "type": "boolean",
+                        "default": false
                     }
                 ],
                 "responses": {

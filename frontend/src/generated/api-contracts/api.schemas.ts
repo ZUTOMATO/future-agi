@@ -28998,6 +28998,10 @@ export type SimulateApiRunTestsListParams = {
    * @maximum 100
    */
   limit?: number;
+  /**
+   * Return the bounded list-card representation instead of the full nested run-test detail payload.
+   */
+  summary?: boolean;
 };
 
 export type SimulateApiRunTestsListSimulationType =
@@ -29059,6 +29063,10 @@ export type SimulateRunTestsListParams = {
    * @maximum 100
    */
   limit?: number;
+  /**
+   * Return the bounded list-card representation instead of the full nested run-test detail payload.
+   */
+  summary?: boolean;
 };
 
 export type SimulateRunTestsListSimulationType =

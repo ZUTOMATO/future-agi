@@ -28035,6 +28035,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
               maximum: 100,
             },
           },
+          summary: {
+            required: false,
+            schema: {
+              type: "boolean",
+              default: false,
+            },
+          },
         },
         responses: {
           200: {
@@ -28613,6 +28620,13 @@ export const OPENAPI_CONTRACT = Object.freeze({
               type: "integer",
               minimum: 1,
               maximum: 100,
+            },
+          },
+          summary: {
+            required: false,
+            schema: {
+              type: "boolean",
+              default: false,
             },
           },
         },

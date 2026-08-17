@@ -36111,6 +36111,7 @@ Query Parameters:
 - search: search string to filter run tests by name
 - limit: number of items per page (default: 10)
 - page: page number (default: 1)
+- summary: return the bounded list-card representation
  */
 export const simulateApiRunTestsListQuerySearchDefault = ``;
 export const simulateApiRunTestsListQuerySimulationTypeDefault = ``;
@@ -36118,6 +36119,8 @@ export const simulateApiRunTestsListQueryPageDefault = 1;
 export const simulateApiRunTestsListQueryPageMax = 100;
 
 export const simulateApiRunTestsListQueryLimitMax = 100;
+
+export const simulateApiRunTestsListQuerySummaryDefault = false;
 
 export const SimulateApiRunTestsListQueryParams = zod.object({
   search: zod.string().default(simulateApiRunTestsListQuerySearchDefault),
@@ -36135,6 +36138,12 @@ export const SimulateApiRunTestsListQueryParams = zod.object({
     .min(1)
     .max(simulateApiRunTestsListQueryLimitMax)
     .optional(),
+  summary: zod
+    .boolean()
+    .default(simulateApiRunTestsListQuerySummaryDefault)
+    .describe(
+      "Return the bounded list-card representation instead of the full nested run-test detail payload.",
+    ),
 });
 
 export const simulateApiRunTestsListResponseDatasetRowIdsItemMax = 255;
@@ -38673,6 +38682,7 @@ Query Parameters:
     'agent_definition' or 'prompt')
 - prompt_template_id: filter by prompt template ID (used when
     simulation_type is 'prompt')
+- summary: return the bounded list-card representation
  */
 export const simulateRunTestsListQuerySearchDefault = ``;
 export const simulateRunTestsListQuerySimulationTypeDefault = ``;
@@ -38680,6 +38690,8 @@ export const simulateRunTestsListQueryPageDefault = 1;
 export const simulateRunTestsListQueryPageMax = 100;
 
 export const simulateRunTestsListQueryLimitMax = 100;
+
+export const simulateRunTestsListQuerySummaryDefault = false;
 
 export const SimulateRunTestsListQueryParams = zod.object({
   search: zod.string().default(simulateRunTestsListQuerySearchDefault),
@@ -38693,6 +38705,12 @@ export const SimulateRunTestsListQueryParams = zod.object({
     .max(simulateRunTestsListQueryPageMax)
     .default(simulateRunTestsListQueryPageDefault),
   limit: zod.number().min(1).max(simulateRunTestsListQueryLimitMax).optional(),
+  summary: zod
+    .boolean()
+    .default(simulateRunTestsListQuerySummaryDefault)
+    .describe(
+      "Return the bounded list-card representation instead of the full nested run-test detail payload.",
+    ),
 });
 
 export const simulateRunTestsListResponseDatasetRowIdsItemMax = 255;
