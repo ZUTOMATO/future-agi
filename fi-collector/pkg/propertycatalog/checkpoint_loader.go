@@ -1499,12 +1499,18 @@ func validateCheckpointActivationEvidence(row checkpointInventoryJSON) error {
 }
 
 func validateEmptyCheckpointStream(row checkpointInventoryJSON) error {
+	emptyCheckpoint := row.CheckpointEvidenceRows == 0 ||
+		((row.CheckpointStatus == "pending" || row.CheckpointStatus == "running") &&
+			row.CheckpointTerminal == 0 &&
+			row.CheckpointNullFirstSequences == row.CheckpointEvidenceRows &&
+			row.CheckpointNullLastSequences == row.CheckpointEvidenceRows &&
+			row.CheckpointLastIssuedSequence == 0 && row.CheckpointFencedSequence == 0 &&
+			row.CheckpointGapCount == 0)
 	preissuedFirstDrainFence := row.StreamStatus == "draining" &&
 		row.StreamFirstSequence == 0 && row.StreamLastSequence == 0 &&
 		row.StreamMaxContiguousSequence == 0 && row.StreamLastIssuedSequence == 1 &&
 		row.StreamFencedSequence == 1 && row.StreamGapCount == 0 &&
-		(row.CheckpointEvidenceRows == 0 ||
-			row.CheckpointNullLastSequences == row.CheckpointEvidenceRows) &&
+		emptyCheckpoint &&
 		row.ActivationStatus != "active"
 	if preissuedFirstDrainFence {
 		// A hot producer binds the exact terminal sequence in the draining

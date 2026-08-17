@@ -586,6 +586,15 @@ func TestEmptyCheckpointStreamAcceptsOnlyPreissuedFirstDrainFence(t *testing.T) 
 		}},
 		{"partial fence", func(value *checkpointInventoryJSON) { value.StreamFencedSequence = 0 }},
 		{"gap", func(value *checkpointInventoryJSON) { value.StreamGapCount = 1 }},
+		{"completed checkpoint", func(value *checkpointInventoryJSON) {
+			value.CheckpointEvidenceRows = 1
+			value.CheckpointProjectionVersion = 1
+			value.CheckpointStatus = "complete"
+			value.CheckpointNullFirstSequences = 1
+			value.CheckpointNullLastSequences = 1
+			value.CheckpointVersion = 1
+			value.CheckpointStateVariants = 1
+		}},
 		{"active", func(value *checkpointInventoryJSON) {
 			value.ActivationStatus = "active"
 			value.ActivationEvidenceRows = 1
