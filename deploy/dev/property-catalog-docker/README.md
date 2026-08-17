@@ -184,21 +184,34 @@ dedicated to this deployment. On a new DEV-only topic, create six partitions,
 replication factor one, 72-hour retention, and a 1 MiB message limit. Do not
 delete, resize, or reconfigure any existing topic.
 
-For the existing standalone DEV broker, an operator can first inspect and then
-create only the missing exact topic:
+For the existing standalone DEV broker, an operator must first inspect and then
+create only the missing exact topic. The `apache/kafka-native` broker image does
+not include the administration scripts, so use the separately installed
+`apache/kafka` CLI image on the broker's existing Docker network:
 
 ```bash
 TOPIC=futureagi.dev.property-catalog.kartik-0815a
-KAFKA_CONTAINER=th7247-catalog-kafka-dev
+KAFKA_NETWORK=th7247-catalog-dev_default
+KAFKA_CLI_IMAGE=apache/kafka:4.1.0
+KAFKA_BROKER=th7247-catalog-kafka-dev:9092
 
-docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-topics.sh \
-  --bootstrap-server 127.0.0.1:9092 --describe --topic "$TOPIC"
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_CLI_IMAGE" \
+  /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server "$KAFKA_BROKER" --describe --topic "$TOPIC"
 
 # Run only after the describe proves this exact new topic is absent.
-docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-topics.sh \
-  --bootstrap-server 127.0.0.1:9092 --create \
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_CLI_IMAGE" \
+  /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server "$KAFKA_BROKER" --create \
   --topic "$TOPIC" --partitions 6 --replication-factor 1 \
   --config retention.ms=259200000 --config max.message.bytes=1048576
+
+# This successful describe is a mandatory pre-start gate. A missing topic can
+# remain latent until the first hot drain proof even when the initial backfill
+# itself writes directly to the isolated catalog tables.
+docker run --rm --network "$KAFKA_NETWORK" "$KAFKA_CLI_IMAGE" \
+  /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server "$KAFKA_BROKER" --describe --topic "$TOPIC"
 ```
 
 The consumer creates only its dedicated group through normal consumption; it
