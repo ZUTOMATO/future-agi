@@ -6265,6 +6265,13 @@ class _IdentityHydrationFakeBuilder(_FakeBuilder):
 
 
 @dataclass
+class _CursorPageFillIdentityHydrationFakeBuilder(_IdentityHydrationFakeBuilder):
+    @staticmethod
+    def fill_bounded_cursor_page_across_slices() -> bool:
+        return True
+
+
+@dataclass
 class _NewestPartitionTraceFakeBuilder(_IdentityHydrationFakeBuilder):
     """Model the default trace list's tail-first adaptive traversal."""
 
@@ -10931,6 +10938,56 @@ def test_sparse_identity_cursor_publishes_each_hydrated_classified_slice() -> No
         for page in pages
         for row in page.rows
     )
+
+
+def test_opted_in_identity_cursor_fills_across_classified_slices() -> None:
+    request_start = END - timedelta(minutes=30)
+    rows = [
+        {
+            "id": row_id,
+            "root_span_id": f"root-{row_id}",
+            "start_time": END - timedelta(minutes=minute),
+            "trace_name": f"presented-{row_id}",
+        }
+        for row_id, minute in (
+            ("newer-nonmatch", 1),
+            ("match-a", 6),
+            ("match-b", 7),
+            ("match-c", 16),
+        )
+    ]
+    expected_matches = rows[1:]
+    builder = _CursorPageFillIdentityHydrationFakeBuilder(
+        rows,
+        start=request_start,
+        end=END,
+        match_rows=expected_matches,
+        recommended_batch_size=10,
+        recommended_seed_batch_size=10,
+    )
+    executor = _IdentityHydrationFakeExecutor(builder, reverse_hydration=True)
+
+    page = read_bounded_filter_page(
+        builder=builder,
+        analytics=executor,
+        filters=[_time_filter(request_start, END)],
+        key_field="id",
+        page_number=0,
+        page_size=5,
+        deadline_ms=5_000,
+        max_seed_attempts=24,
+        max_candidates=10,
+        max_query_count=50,
+        classify_batch_size=10,
+        include_incomplete_rows=True,
+        bounded_continuation=True,
+    )
+
+    assert page.complete is True
+    assert [row["id"] for row in page.rows] == [row["id"] for row in expected_matches]
+    assert page.has_more is False
+    assert page.continuation_slice_end is None
+    assert [attempt.kind for attempt in page.attempts].count("hydrate") == 1
 
 
 def test_sparse_identity_cursor_waits_for_the_whole_active_slice() -> None:

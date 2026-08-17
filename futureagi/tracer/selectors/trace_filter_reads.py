@@ -1037,6 +1037,15 @@ def read_bounded_filter_page(
         if callable(repeated_eager_flush_builder)
         else False
     )
+    cursor_slice_fill_builder = getattr(
+        builder, "fill_bounded_cursor_page_across_slices", None
+    )
+    fill_bounded_cursor_page_across_slices = bool(
+        bounded_continuation
+        and identity_only_classification
+        and callable(cursor_slice_fill_builder)
+        and cursor_slice_fill_builder()
+    )
     # A builder may expose a finite raw-witness query only when it is a
     # complete superset of exact latest-state membership. Run that cheap,
     # indexable prefilter before the first full-window classifier batch; the
@@ -2589,6 +2598,7 @@ def read_bounded_filter_page(
                     and seed_proves_result_order
                     and matched_by_id
                     and len(matched_by_id) < prefix_needed
+                    and not fill_bounded_cursor_page_across_slices
                 ):
                     # Every root in this half-open slice has crossed the exact
                     # latest-state classifier. Its matches are therefore a

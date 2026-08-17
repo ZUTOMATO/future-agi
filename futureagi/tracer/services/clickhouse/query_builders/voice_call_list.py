@@ -487,6 +487,24 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
             and self.page_size <= 512
         )
 
+    def fill_bounded_cursor_page_across_slices(self) -> bool:
+        """Fill one public voice page before returning a cursor checkpoint.
+
+        Voice roots can be sparse across adjacent time slices. Publishing each
+        fully classified slice separately is exact, but makes the browser pay
+        one HTTP round trip for every handful of calls. Public interactive
+        reads may retain those classified roots and continue within the
+        selector's existing query, memory, and wall-clock limits. Historical,
+        sampled, and internal scans retain the smaller chunk contract.
+        """
+
+        return bool(
+            not self._bounded_internal_scan
+            and not self._bounded_identity_only
+            and self._bounded_sampling_rate is None
+            and self.page_size <= 512
+        )
+
     @staticmethod
     def recommended_filter_page_hydration_reserve_ms() -> int:
         return TraceListQueryBuilder.recommended_filter_page_hydration_reserve_ms()

@@ -394,6 +394,18 @@ def test_internal_voice_selection_retains_unhydrated_membership_projection():
     )
 
     assert builder.use_identity_only_filter_classification() is False
+    assert builder.fill_bounded_cursor_page_across_slices() is False
+
+
+@pytest.mark.unit
+def test_public_voice_cursor_fills_page_across_adjacent_slices():
+    builder = VoiceCallListQueryBuilder(
+        project_id=PROJECT_ID,
+        page_size=25,
+    )
+
+    assert builder.use_identity_only_filter_classification() is True
+    assert builder.fill_bounded_cursor_page_across_slices() is True
 
 
 @pytest.mark.unit
