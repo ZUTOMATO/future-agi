@@ -600,11 +600,12 @@ def _query_params(
         "catalog_epoch": activation.catalog_epoch,
         "catalog_revision": activation.catalog_revision,
         "catalog_lineage_anchor_revision": activation.lineage_anchor_revision,
-        # Workspace-default definitions remain visible when the caller narrows
-        # project-scoped definitions.  The project list is an additive
-        # visibility restriction, not a request to hide workspace-owned
-        # definitions such as eval templates.
-        "catalog_include_workspace_default": 1,
+        # An explicit project scope is a strict visibility boundary.  Keeping
+        # workspace defaults in a project picker can surface labels/templates
+        # that have no relationship to the selected project.  Workspace-wide
+        # consumers still receive defaults when they intentionally omit a
+        # project scope; universal system fields use ``always`` visibility.
+        "catalog_include_workspace_default": int(not projects),
         "catalog_include_all_projects": int(not projects),
         "catalog_project_ids": projects,
         "catalog_agent_definition_id": scope["agent_definition_id"],

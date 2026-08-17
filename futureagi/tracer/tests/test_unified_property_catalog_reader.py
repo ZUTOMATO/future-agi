@@ -475,7 +475,7 @@ def test_catalog_reader_visibility_params_are_authorization_owned(settings):
     assert params["catalog_project_ids"] == ()
 
 
-def test_catalog_reader_keeps_workspace_defaults_for_project_scope(settings):
+def test_catalog_reader_hides_workspace_defaults_for_project_scope(settings):
     settings.SECRET_KEY = "property-reader-secret"
     executor = FakeExecutor(
         [
@@ -490,6 +490,6 @@ def test_catalog_reader_keeps_workspace_defaults_for_project_scope(settings):
     ).read_page(scope=_scope(project_ids=(PROJECT_ID,)), query=QUERY, page_size=50)
 
     params = executor.calls[2]["params"]
-    assert params["catalog_include_workspace_default"] == 1
+    assert params["catalog_include_workspace_default"] == 0
     assert params["catalog_include_all_projects"] == 0
     assert params["catalog_project_ids"] == (PROJECT_ID,)

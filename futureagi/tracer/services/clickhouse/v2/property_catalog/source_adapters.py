@@ -1221,17 +1221,28 @@ def _load_eval_template_page(
             source_entity_id=str(row["id"]),
             source_updated_at=row["_catalog_updated_at"],
             definition=_eval_definition(row, kind=PropertyKind.EVAL_TEMPLATE),
-            visibilities=(
-                (
-                    VisibilityBinding(
-                        VisibilityScope.WORKSPACE_DEFAULT,
-                        context.workspace_id,
-                    ),
-                )
-                if row["organization_id"] is not None
-                else tuple(
-                    VisibilityBinding(VisibilityScope.PROJECT, project_id)
-                    for project_id in project_ids.get(str(row["id"]), ())
+            visibilities=tuple(
+                sorted(
+                    {
+                        *(
+                            (
+                                VisibilityBinding(
+                                    VisibilityScope.WORKSPACE_DEFAULT,
+                                    context.workspace_id,
+                                ),
+                            )
+                            if row["organization_id"] is not None
+                            else ()
+                        ),
+                        *(
+                            VisibilityBinding(
+                                VisibilityScope.PROJECT,
+                                project_id,
+                            )
+                            for project_id in project_ids.get(str(row["id"]), ())
+                        ),
+                    },
+                    key=lambda item: (item.scope, item.visibility_id),
                 )
             ),
             is_deleted=bool(row["deleted"]),

@@ -242,6 +242,42 @@ def test_deleted_last_relationship_emits_empty_complete_visibility_set(
     assert records[0].visibilities == ()
 
 
+def test_organization_template_keeps_workspace_and_exact_project_bindings(
+    monkeypatch: Any,
+) -> None:
+    row = {
+        "id": TEMPLATE,
+        "name": "Quality",
+        "config": {"output": "score"},
+        "choices": [],
+        "organization_id": ORG,
+        "workspace_id": WORKSPACE,
+        "deleted": False,
+        "deleted_at": None,
+        "updated_at": NOW - timedelta(days=1),
+        "_catalog_updated_at": NOW,
+    }
+
+    monkeypatch.setattr(
+        source_adapters,
+        "_keyset_values",
+        lambda *args, **kwargs: [row],
+    )
+    monkeypatch.setattr(
+        source_adapters,
+        "_eval_template_projects",
+        lambda **kwargs: ({TEMPLATE: (PROJECT,)}, {TEMPLATE: ("live-config",)}),
+    )
+
+    records = _load_eval_template_page(context=_context(), cursor=None, limit=10)
+
+    assert len(records) == 1
+    assert records[0].visibilities == (
+        VisibilityBinding(VisibilityScope.PROJECT, PROJECT),
+        VisibilityBinding(VisibilityScope.WORKSPACE_DEFAULT, WORKSPACE),
+    )
+
+
 def test_incremental_empty_visibility_tombstones_last_project_binding() -> None:
     definition = _definition()
     old: PropertyBindingRow = project_definition(
