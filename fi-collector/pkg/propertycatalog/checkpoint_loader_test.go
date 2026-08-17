@@ -566,6 +566,41 @@ func TestCheckpointLoaderAcceptsExactEmptyNewestRevisionOverOlderLedgerHistory(t
 	}
 }
 
+func TestEmptyCheckpointStreamAcceptsOnlyPreissuedFirstDrainFence(t *testing.T) {
+	row := validCheckpointInventory(t, false)[1]
+	row.StreamStatus = "draining"
+	row.StreamLastIssuedSequence = 1
+	row.StreamFencedSequence = 1
+	if err := validateEmptyCheckpointStream(row); err != nil {
+		t.Fatalf("exact preissued first drain fence rejected: %v", err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*checkpointInventoryJSON)
+	}{
+		{"open", func(value *checkpointInventoryJSON) { value.StreamStatus = "open" }},
+		{"later sequence", func(value *checkpointInventoryJSON) {
+			value.StreamLastIssuedSequence = 2
+			value.StreamFencedSequence = 2
+		}},
+		{"partial fence", func(value *checkpointInventoryJSON) { value.StreamFencedSequence = 0 }},
+		{"gap", func(value *checkpointInventoryJSON) { value.StreamGapCount = 1 }},
+		{"active", func(value *checkpointInventoryJSON) {
+			value.ActivationStatus = "active"
+			value.ActivationEvidenceRows = 1
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := row
+			test.mutate(&candidate)
+			if err := validateEmptyCheckpointStream(candidate); err == nil {
+				t.Fatal("unsafe empty source-stream state accepted")
+			}
+		})
+	}
+}
+
 func TestDeliveryLeaseGuardReadsExactBoundedManifestStreamLease(t *testing.T) {
 	row := validDeliveryLeaseRow()
 	called := 0

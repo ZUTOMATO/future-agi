@@ -1499,6 +1499,22 @@ func validateCheckpointActivationEvidence(row checkpointInventoryJSON) error {
 }
 
 func validateEmptyCheckpointStream(row checkpointInventoryJSON) error {
+	preissuedFirstDrainFence := row.StreamStatus == "draining" &&
+		row.StreamFirstSequence == 0 && row.StreamLastSequence == 0 &&
+		row.StreamMaxContiguousSequence == 0 && row.StreamLastIssuedSequence == 1 &&
+		row.StreamFencedSequence == 1 && row.StreamGapCount == 0 &&
+		(row.CheckpointEvidenceRows == 0 ||
+			row.CheckpointNullLastSequences == row.CheckpointEvidenceRows) &&
+		row.ActivationStatus != "active"
+	if preissuedFirstDrainFence {
+		// A hot producer binds the exact terminal sequence in the draining
+		// source-stream row before publishing it. A consumer that starts in
+		// that narrow window must be allowed to consume sequence one; the
+		// normal delivery/checkpoint proof becomes mandatory immediately after
+		// the physical row exists. No later sequence, gap, or active revision is
+		// accepted without that ledger proof.
+		return nil
+	}
 	if row.StreamFirstSequence != 0 || row.StreamLastSequence != 0 ||
 		row.StreamMaxContiguousSequence != 0 || row.StreamLastIssuedSequence != 0 ||
 		row.StreamFencedSequence != 0 ||
