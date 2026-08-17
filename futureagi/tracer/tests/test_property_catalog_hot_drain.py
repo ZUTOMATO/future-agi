@@ -19,6 +19,7 @@ from tracer.services.clickhouse.v2.property_catalog.activation import (
 )
 from tracer.services.clickhouse.v2.property_catalog.codec import framed_sha256
 from tracer.services.clickhouse.v2.property_catalog.coordinator import (
+    MAX_REVISION_LEASE_SECONDS,
     ClickHouseRevisionCoordinator,
     ProducerRevisionAssignment,
     PropertyCatalogCoordinatorError,
@@ -306,6 +307,46 @@ def _coordinator(
         deadline=SharedCatalogDeadline(wall_ms=30_000),
         now=lambda: NOW,
     )
+
+
+def test_coordinator_bounds_extended_initial_revision_lease() -> None:
+    client = _CoordinatorClient()
+    coordinator = ClickHouseRevisionCoordinator(
+        client,
+        database=DATABASE,
+        serializer=InProcessCatalogMutationSerializer(),
+        producer_fence_sink=_FenceSink(),
+        hot_producer_stream_id=STREAM,
+        deadline=SharedCatalogDeadline(wall_ms=30_000),
+        lease_seconds=MAX_REVISION_LEASE_SECONDS,
+        now=lambda: NOW,
+    )
+
+    lease = coordinator.allocate(
+        organization_id=ORG,
+        workspace_id=WORKSPACE,
+        catalog_epoch=1,
+        projection_version=1,
+        build_token=BUILD,
+        source_scope=SOURCE_SCOPE,
+        planned_streams=_plan_streams(),
+        now=NOW,
+    )
+
+    assert lease.expires_at - lease.issued_at == timedelta(
+        seconds=MAX_REVISION_LEASE_SECONDS
+    )
+    with pytest.raises(ValueError, match="1800"):
+        ClickHouseRevisionCoordinator(
+            client,
+            database=DATABASE,
+            serializer=InProcessCatalogMutationSerializer(),
+            producer_fence_sink=_FenceSink(),
+            hot_producer_stream_id=STREAM,
+            deadline=SharedCatalogDeadline(wall_ms=30_000),
+            lease_seconds=MAX_REVISION_LEASE_SECONDS + 1,
+            now=lambda: NOW,
+        )
 
 
 def test_prepared_then_ready_proof_binds_raw_physical_ledger() -> None:

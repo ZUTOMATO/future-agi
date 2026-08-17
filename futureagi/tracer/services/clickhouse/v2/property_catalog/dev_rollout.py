@@ -33,7 +33,7 @@ DEV_DATABASE_PREFIX = "th7247_catalog_dev_"
 DEV_ENVIRONMENT = "development"
 DEV_CLOUD_DEPLOYMENT = "DEV"
 DEV_STANDARD_MAX_WALL_MS = 100_000
-DEV_INITIAL_BACKFILL_MAX_WALL_MS = 540_000
+DEV_INITIAL_BACKFILL_MAX_WALL_MS = 1_740_000
 _DEV_IDENTITY_RE = re.compile(r"^dev:[a-z0-9][a-z0-9._:/-]{2,127}$")
 _SOURCE_DATABASE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -126,7 +126,7 @@ class DevRolloutRequest:
                 <= DEV_INITIAL_BACKFILL_MAX_WALL_MS
             ):
                 raise DevRolloutError(
-                    "explicit initial backfill wall must be in [100001, 540000] ms"
+                    "explicit initial backfill wall must be in [100001, 1740000] ms"
                 )
             if not self.execute or self.status:
                 raise DevRolloutError(

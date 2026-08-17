@@ -19,6 +19,7 @@ from tracer.services.clickhouse.v2.property_catalog.activation import (
     RevisionLease,
 )
 from tracer.services.clickhouse.v2.property_catalog.coordinator import (
+    MAX_REVISION_LEASE_SECONDS,
     REVISION_LEASE_SECONDS,
 )
 from tracer.services.clickhouse.v2.property_catalog.dev_rollout import (
@@ -1532,8 +1533,10 @@ def test_dev_runtime_requires_v2_shared_proof_and_temporal_headroom(
         extended.span_query_timeout_ms
         == DEV_INITIAL_BACKFILL_CANONICAL_SPAN_QUERY_TIMEOUT_MS
     )
-    assert (REVISION_LEASE_SECONDS * 1_000 - extended.rollout_wall_ms) == 60_000
-    with pytest.raises(PropertyCatalogDevRuntimeError, match="540000"):
+    assert (
+        MAX_REVISION_LEASE_SECONDS * 1_000 - extended.rollout_wall_ms
+    ) == 60_000
+    with pytest.raises(PropertyCatalogDevRuntimeError, match="1740000"):
         replace(
             config,
             rollout_wall_ms=DEV_INITIAL_BACKFILL_MAX_WALL_MS + 1,
@@ -1618,7 +1621,7 @@ def test_factory_shares_one_extended_deadline_with_lease_headroom(
     assert runtime.lifecycle_state is not None
     assert runtime.lifecycle_state._deadline is runtime.deadline
     assert runtime.hot_proof_source.deadline is runtime.deadline
-    assert runtime.coordinator._lease_seconds == REVISION_LEASE_SECONDS
+    assert runtime.coordinator._lease_seconds == MAX_REVISION_LEASE_SECONDS
     assert (
         runtime.coordinator._lease_seconds * 1_000 - runtime.deadline.wall_ms >= 60_000
     )
@@ -1655,6 +1658,7 @@ def test_default_runtime_source_budget_stays_below_standard_shared_wall(
 
     assert runtime.span_reader._timeout_ms == CANONICAL_SPAN_QUERY_TIMEOUT_MS
     assert runtime.source_client._explicit_initial_backfill is False
+    assert runtime.coordinator._lease_seconds == REVISION_LEASE_SECONDS
     assert runtime.config.source.read_timeout_ceiling_ms == 9_500
     assert source_budget.adapter_wall_timeout_seconds <= 100.0
     assert source_budget.shared_deadline is runtime.deadline

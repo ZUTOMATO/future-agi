@@ -40,6 +40,7 @@ from .activation import (
 )
 from .codec import canonical_json, canonical_json_sha256, canonical_uuid
 from .coordinator import (
+    MAX_REVISION_LEASE_SECONDS,
     REVISION_LEASE_SECONDS,
     AtomicSingleTenantFenceFile,
     ClickHouseRevisionCoordinator,
@@ -912,9 +913,11 @@ class DevRuntimeConfig:
                 <= DEV_INITIAL_BACKFILL_MAX_WALL_MS
             ):
                 raise PropertyCatalogDevRuntimeError(
-                    "explicit initial backfill wall must be in [100001, 540000] ms"
+                    "explicit initial backfill wall must be in [100001, 1740000] ms"
                 )
-            lease_headroom_ms = REVISION_LEASE_SECONDS * 1_000 - self.rollout_wall_ms
+            lease_headroom_ms = (
+                MAX_REVISION_LEASE_SECONDS * 1_000 - self.rollout_wall_ms
+            )
             if lease_headroom_ms < _MIN_INITIAL_BACKFILL_LEASE_HEADROOM_MS:
                 raise PropertyCatalogDevRuntimeError(
                     "explicit initial backfill wall must leave at least 60000 ms "
@@ -2848,7 +2851,7 @@ class CheckedInPropertyCatalogDevRuntime:
                 statement_timeout_ms=min(8_000, postgres_remaining - 1),
                 wall_timeout_seconds=postgres_remaining / 1_000,
             ),
-            adapter_wall_timeout_seconds=remaining / 1_000,
+            adapter_wall_timeout_seconds=min(540.0, remaining / 1_000),
             shared_deadline=self.deadline,
         )
 
@@ -3539,7 +3542,16 @@ class PropertyCatalogDevRuntimeFactory:
             producer_fence_sink=self._fence_sink_factory(config.revision_fence_file),
             hot_producer_stream_id=config.hot_producer_stream_id,
             deadline=deadline,
-            lease_seconds=REVISION_LEASE_SECONDS,
+            lease_seconds=(
+                (
+                    config.rollout_wall_ms
+                    + _MIN_INITIAL_BACKFILL_LEASE_HEADROOM_MS
+                    + 999
+                )
+                // 1_000
+                if config.explicit_initial_backfill_wall
+                else REVISION_LEASE_SECONDS
+            ),
             now=self._now,
         )
         span_reader = CanonicalSpanSourceReader(

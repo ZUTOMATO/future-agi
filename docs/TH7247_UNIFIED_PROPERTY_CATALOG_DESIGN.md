@@ -188,8 +188,9 @@ deployed sidecar:
   persisted state;
 - wall: scheduled/default work is hard-capped at 100 seconds; only the explicit
   management-command initial backfill may request `--initial-backfill-wall-ms`
-  in `100001..540000`, preserving at least 60 seconds of headroom inside the
-  immutable 600-second revision lease;
+  in `100001..1740000`, preserving at least 60 seconds of headroom inside an
+  immutable initial-build lease of at most 1,800 seconds. Scheduled and default
+  revisions retain the 600-second lease;
 - full repair: selected at 24 hours or 2,048 active revisions since the
   lineage anchor.
 

@@ -49,6 +49,7 @@ _MAX_STATE_VARIANTS = 32
 _MAX_DELIVERIES = 100_000
 _MAX_DELIVERY_REPLAYS = 8
 REVISION_LEASE_SECONDS = 600
+MAX_REVISION_LEASE_SECONDS = 1_800
 _SOURCE_STREAM_COLUMNS = (
     "organization_id",
     "workspace_id",
@@ -327,9 +328,9 @@ class ClickHouseRevisionCoordinator:
             raise TypeError("coordinator requires a producer fence sink")
         if (
             type(lease_seconds) is not int
-            or not 1 <= lease_seconds <= REVISION_LEASE_SECONDS
+            or not 1 <= lease_seconds <= MAX_REVISION_LEASE_SECONDS
         ):
-            raise ValueError("revision lease_seconds must be in [1, 600]")
+            raise ValueError("revision lease_seconds must be in [1, 1800]")
         self._client = client
         self._database = database
         self._serializer = serializer
@@ -731,7 +732,9 @@ class ClickHouseRevisionCoordinator:
         _require_utc(now, "now")
         _require_utc(drain_deadline, "drain_deadline")
         if (
-            not now < drain_deadline <= lease.issued_at + timedelta(minutes=10)
+            not now
+            < drain_deadline
+            <= lease.issued_at + timedelta(seconds=MAX_REVISION_LEASE_SECONDS)
             or drain_deadline != lease.expires_at
         ):
             raise PropertyCatalogCoordinatorError(
@@ -1746,6 +1749,7 @@ __all__ = [
     "ProducerFenceSink",
     "ProducerRevisionAssignment",
     "PropertyCatalogCoordinatorError",
+    "MAX_REVISION_LEASE_SECONDS",
     "REVISION_LEASE_SECONDS",
     "encode_producer_assignment",
     "producer_assignment_sha256",

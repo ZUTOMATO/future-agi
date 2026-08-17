@@ -231,16 +231,18 @@ docker compose -f "$COMPOSE" --profile operator run --rm \
 
 # The only authorized catalog mutation path; target database must be new.
 docker compose -f "$COMPOSE" --profile operator run --rm \
-  property-catalog-operator --execute --initial-backfill-wall-ms 540000
+  property-catalog-operator --execute --initial-backfill-wall-ms 1200000
 
 docker compose -f "$COMPOSE" --profile operator run --rm \
   property-catalog-operator --status
 ```
 
-Pass the explicit initial-backfill wall allowance on the first execution for
-the reviewed 12-month scope. The reservation lease is immutable: retrying a
-short default execution cannot lengthen its lease, and an expired incomplete
-revision must remain fail-closed under a fresh suffix-isolated DEV catalog.
+Pass the explicit 1,200,000 ms initial-backfill wall allowance on the first
+execution for the reviewed 33-project, 12-month scope. The allowed ceiling is
+1,740,000 ms so the corresponding initial-build lease retains at least 60
+seconds of headroom. The reservation lease is immutable: retrying a short
+default execution cannot lengthen its lease, and an expired incomplete revision
+must remain fail-closed under a fresh suffix-isolated DEV catalog.
 
 The expected isolated target contains exactly these six tables:
 
