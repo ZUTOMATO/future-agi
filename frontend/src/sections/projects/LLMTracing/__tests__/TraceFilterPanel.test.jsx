@@ -2461,6 +2461,54 @@ describe("exact manual attribute fallback", () => {
 
     document.body.removeChild(anchorEl);
   });
+
+  it("hides unrelated catalog continuation for matched and attribute views", async () => {
+    propertyCatalogMock.mockReturnValue({
+      legacyFallbackRequired: false,
+      metrics: [
+        {
+          name: "model",
+          display_name: "Model",
+          category: "system_metric",
+          source: "traces",
+          type: "string",
+        },
+      ],
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      error: null,
+      hasNextPage: true,
+      isFetchingNextPage: false,
+      isFetchNextPageError: false,
+      fetchNextPage: vi.fn(),
+    });
+
+    const { anchorEl } = renderPanel({
+      projectId: "project-whatfix",
+      source: "traces",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Property" }));
+    const search = screen.getByPlaceholderText("Search properties...");
+    fireEvent.change(search, { target: { value: "model" } });
+
+    expect(await screen.findByText("Model")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: /eval and annotation properties/i,
+      }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "" } });
+    fireEvent.click(screen.getByText("Attributes"));
+    expect(
+      screen.queryByRole("button", {
+        name: /eval and annotation properties/i,
+      }),
+    ).not.toBeInTheDocument();
+
+    document.body.removeChild(anchorEl);
+  });
 });
 
 describe("filter-value picker bounded-read UX", () => {

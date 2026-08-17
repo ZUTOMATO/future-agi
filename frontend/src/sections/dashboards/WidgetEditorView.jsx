@@ -393,6 +393,70 @@ export function getWidgetMetricCatalogRequest({
   };
 }
 
+export function WidgetCatalogPaginationControl({
+  pickerCategory,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
+}) {
+  const activeRequestRef = useRef(null);
+  const handleLoadMore = useCallback(() => {
+    if (
+      pickerCategory === "custom_attribute" ||
+      !hasNextPage ||
+      isFetchingNextPage ||
+      activeRequestRef.current
+    ) {
+      return;
+    }
+    const request = Promise.resolve(onLoadMore());
+    activeRequestRef.current = request;
+    const clearRequest = () => {
+      if (activeRequestRef.current === request) {
+        activeRequestRef.current = null;
+      }
+    };
+    request.then(clearRequest, clearRequest);
+  }, [hasNextPage, isFetchingNextPage, onLoadMore, pickerCategory]);
+
+  if (pickerCategory === "custom_attribute") return null;
+  if (isFetchingNextPage) {
+    return (
+      <Box
+        role="status"
+        sx={{
+          py: 1.5,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 0.75,
+        }}
+      >
+        <CircularProgress size={16} />
+        <Typography sx={{ fontSize: 11, color: "text.secondary" }}>
+          Loading more properties…
+        </Typography>
+      </Box>
+    );
+  }
+  if (!hasNextPage) return null;
+
+  return (
+    <Box sx={{ py: 0.75, textAlign: "center" }}>
+      <Button size="small" onClick={handleLoadMore} sx={{ fontSize: 11 }}>
+        Load more properties
+      </Button>
+    </Box>
+  );
+}
+
+WidgetCatalogPaginationControl.propTypes = {
+  pickerCategory: PropTypes.string.isRequired,
+  hasNextPage: PropTypes.bool,
+  isFetchingNextPage: PropTypes.bool,
+  onLoadMore: PropTypes.func.isRequired,
+};
+
 const DATASET_WIDGET_DIMENSIONS = new Set([
   "dataset",
   "eval_template",
@@ -2040,23 +2104,6 @@ export default function WidgetEditorView() {
   const isPickerInventoryLoading =
     isPaginatedLoading ||
     (cursorAttributePickerActive && isCursorAttributeLoading);
-
-  // Infinite scroll handler for the picker's right panel
-  const pickerListRef = useRef(null);
-  const handlePickerScroll = useCallback(
-    (e) => {
-      const el = e.target;
-      if (
-        pickerCategory !== "custom_attribute" &&
-        el.scrollHeight - el.scrollTop - el.clientHeight < 50 &&
-        hasNextPage &&
-        !isFetchingNextPage
-      ) {
-        fetchNextPage();
-      }
-    },
-    [fetchNextPage, hasNextPage, isFetchingNextPage, pickerCategory],
-  );
 
   // Chart tab — axis config
   const [axisConfig, setAxisConfig] = useState({
@@ -7207,12 +7254,8 @@ export default function WidgetEditorView() {
                   </Box>
                 ))}
               </Box>
-              {/* Right: items — paginated with infinite scroll */}
-              <Box
-                ref={pickerListRef}
-                onScroll={handlePickerScroll}
-                sx={{ flex: 1, overflow: "auto", maxHeight: 340 }}
-              >
+              {/* Right: items — each continuation requires an explicit click. */}
+              <Box sx={{ flex: 1, overflow: "auto", maxHeight: 340 }}>
                 {isPickerInventoryLoading &&
                   pickerMetricOptions.length === 0 &&
                   Array.from({ length: 8 }).map((_, i) => (
@@ -7361,11 +7404,12 @@ export default function WidgetEditorView() {
                     </Box>
                   );
                 })}
-                {isFetchingNextPage && (
-                  <Box sx={{ py: 1.5, textAlign: "center" }}>
-                    <CircularProgress size={16} />
-                  </Box>
-                )}
+                <WidgetCatalogPaginationControl
+                  pickerCategory={pickerCategory}
+                  hasNextPage={hasNextPage}
+                  isFetchingNextPage={isFetchingNextPage}
+                  onLoadMore={fetchNextPage}
+                />
                 {cursorAttributePickerActive && (
                   <Box sx={{ px: 1.5, pb: 1.5 }}>
                     <AttributeInventoryControls

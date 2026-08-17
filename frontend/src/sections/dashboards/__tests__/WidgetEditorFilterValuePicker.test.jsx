@@ -26,9 +26,53 @@ import {
   isWidgetCatalogOptionAllowed,
   mergeWidgetCursorAttributeOptions,
   restoreWidgetFilterConfig,
+  WidgetCatalogPaginationControl,
 } from "../WidgetEditorView";
 
 describe("WidgetEditor filter-value picker", () => {
+  it("loads each property catalog page only through an explicit single-flight action", () => {
+    const fetchNextPage = vi.fn(() => new Promise(() => {}));
+    const { rerender } = render(
+      <WidgetCatalogPaginationControl
+        pickerCategory="all"
+        hasNextPage
+        isFetchingNextPage={false}
+        onLoadMore={fetchNextPage}
+      />,
+    );
+
+    const loadMore = screen.getByRole("button", {
+      name: "Load more properties",
+    });
+    fireEvent.click(loadMore);
+    fireEvent.click(loadMore);
+    expect(fetchNextPage).toHaveBeenCalledOnce();
+
+    rerender(
+      <WidgetCatalogPaginationControl
+        pickerCategory="all"
+        hasNextPage
+        isFetchingNextPage
+        onLoadMore={fetchNextPage}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading more properties",
+    );
+
+    rerender(
+      <WidgetCatalogPaginationControl
+        pickerCategory="custom_attribute"
+        hasNextPage
+        isFetchingNextPage={false}
+        onLoadMore={fetchNextPage}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Load more properties" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers only properties supported by the selected widget adapters", () => {
     const datasetEval = {
       name: "eval-config-id",

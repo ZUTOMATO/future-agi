@@ -1439,6 +1439,18 @@ function PropertyPicker({
   ]);
   const visibleProperties = filtered.slice(0, visiblePropertyLimit);
   const hiddenCount = Math.max(filtered.length - visiblePropertyLimit, 0);
+  const catalogCategoryCanContinue = ["all", "eval", "annotation"].includes(
+    category,
+  );
+  const catalogSearchAlreadyMatched = Boolean(
+    search.trim() && filtered.length > 0,
+  );
+  // The finite property catalog contains eval/annotation entries only at this
+  // point; custom attributes have their own retained cursor. Do not advertise
+  // unrelated catalog pages in the Attributes/System groups, or after an
+  // exact search result has already been found.
+  const shouldShowCatalogContinuation =
+    catalogCategoryCanContinue && !catalogSearchAlreadyMatched;
   // A successful exact probe stops only that supplemental chain. The retained
   // catalog remains explicitly pageable so sibling substring matches can be
   // discovered without automatically draining it.
@@ -2002,23 +2014,27 @@ function PropertyPicker({
                     </Button>
                   </Box>
                 )}
-              {hasNextCatalogPage && !isFetchingNextCatalogPage && (
-                <Box
-                  sx={{ display: "flex", justifyContent: "center", py: 0.5 }}
-                >
-                  <Button
-                    data-filter-property-load-more-catalog
-                    size="small"
-                    onClick={() => loadNextCatalogPage?.()}
-                    sx={{ fontSize: 11 }}
+              {hasNextCatalogPage &&
+                shouldShowCatalogContinuation &&
+                !isFetchingNextCatalogPage && (
+                  <Box
+                    sx={{ display: "flex", justifyContent: "center", py: 0.5 }}
                   >
-                    {catalogNextPageError
-                      ? "Retry loading properties"
-                      : "Load more eval and annotation properties"}
-                  </Button>
-                </Box>
-              )}
-              {isFetchingNextCatalogPage && (
+                    <Button
+                      data-filter-property-load-more-catalog
+                      size="small"
+                      onClick={() => loadNextCatalogPage?.()}
+                      sx={{ fontSize: 11 }}
+                    >
+                      {catalogNextPageError
+                        ? "Retry loading properties"
+                        : search.trim()
+                          ? "Continue searching eval and annotation properties"
+                          : "Load more eval and annotation properties"}
+                    </Button>
+                  </Box>
+                )}
+              {shouldShowCatalogContinuation && isFetchingNextCatalogPage && (
                 <Box
                   role="status"
                   sx={{
