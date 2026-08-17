@@ -750,40 +750,65 @@ class CanonicalSpanSourceReader:
         return parsed, observations
 
     def audit(self, frozen: FrozenSpanSource) -> SpanAggregateProof:
-        """One aggregate SELECT over every logical latest row in the source range."""
+        """Independently audit each project and combine its multiset proof."""
 
-        rows = self._query(
-            _aggregate_audit_sql(self._source_table()),
-            {
-                "catalog_project_ids": frozen.project_ids,
-                "catalog_since": frozen.since,
-                "catalog_until": frozen.until,
-                "catalog_projected_typed_string_value_bytes": PROJECTED_TYPED_STRING_VALUE_BYTES,
-                "catalog_projected_array_string_value_bytes": PROJECTED_ARRAY_STRING_VALUE_BYTES,
-                "catalog_projected_value_budget_bytes": PROJECTED_VALUE_BUDGET_BYTES,
-                "catalog_projected_array_members": CATALOG_BUILD_LIMITS.max_array_members,
-                "catalog_max_source_attribute_entries": self._limits.max_source_attribute_entries,
-                "catalog_max_source_attribute_bytes": self._limits.max_source_attribute_bytes,
-            },
-        )
-        if len(rows) != 1:
-            raise PropertyCatalogSpanSourceError(
-                "canonical-span aggregate audit did not return one row"
+        # A workspace-wide aggregate makes ClickHouse account every project's
+        # physical reads against one max_bytes_to_read budget.  Keep the same
+        # independent aggregate proof, but execute it once per disjoint project
+        # scope so one large workspace cannot exhaust that per-query ceiling.
+        # Project ID is part of every audited hash, so XOR and wrapping UInt64
+        # sums compose to exactly the same workspace multiset proof.
+        sql = _aggregate_audit_sql(self._source_table())
+        count = 0
+        xor = [0, 0, 0, 0]
+        total = [0, 0, 0, 0]
+        state_conflict_count = 0
+        for project_id in frozen.project_ids:
+            rows = self._query(
+                sql,
+                {
+                    "catalog_project_ids": (project_id,),
+                    "catalog_since": frozen.since,
+                    "catalog_until": frozen.until,
+                    "catalog_projected_typed_string_value_bytes": PROJECTED_TYPED_STRING_VALUE_BYTES,
+                    "catalog_projected_array_string_value_bytes": PROJECTED_ARRAY_STRING_VALUE_BYTES,
+                    "catalog_projected_value_budget_bytes": PROJECTED_VALUE_BUDGET_BYTES,
+                    "catalog_projected_array_members": CATALOG_BUILD_LIMITS.max_array_members,
+                    "catalog_max_source_attribute_entries": self._limits.max_source_attribute_entries,
+                    "catalog_max_source_attribute_bytes": self._limits.max_source_attribute_bytes,
+                },
             )
-        row = rows[0]
-        return SpanAggregateProof(
-            count=_strict_uint(row.get("source_count"), "audit source_count"),
-            xor=tuple(
-                _strict_uint(row.get(f"audit_h{index}_xor"), f"audit h{index} xor")
-                for index in range(1, 5)
-            ),  # type: ignore[arg-type]
-            total=tuple(
-                _strict_uint(row.get(f"audit_h{index}_sum"), f"audit h{index} sum")
-                for index in range(1, 5)
-            ),  # type: ignore[arg-type]
-            state_conflict_count=_strict_uint(
+            if len(rows) != 1:
+                raise PropertyCatalogSpanSourceError(
+                    "canonical-span project audit did not return one row"
+                )
+            row = rows[0]
+            count += _strict_uint(row.get("source_count"), "audit source_count")
+            state_conflict_count += _strict_uint(
                 row.get("state_conflict_count"), "state conflict count"
-            ),
+            )
+            _strict_uint(count, "combined audit source_count")
+            _strict_uint(
+                state_conflict_count,
+                "combined state conflict count",
+            )
+            for index in range(1, 5):
+                xor[index - 1] ^= _strict_uint(
+                    row.get(f"audit_h{index}_xor"),
+                    f"audit h{index} xor",
+                )
+                total[index - 1] = (
+                    total[index - 1]
+                    + _strict_uint(
+                        row.get(f"audit_h{index}_sum"),
+                        f"audit h{index} sum",
+                    )
+                ) % (1 << 64)
+        return SpanAggregateProof(
+            count=count,
+            xor=tuple(xor),  # type: ignore[arg-type]
+            total=tuple(total),  # type: ignore[arg-type]
+            state_conflict_count=state_conflict_count,
         )
 
     def _source_table(self) -> str:

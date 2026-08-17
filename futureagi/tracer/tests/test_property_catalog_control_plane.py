@@ -1140,6 +1140,7 @@ class _SpanAuditClient:
 
     def __init__(self) -> None:
         self.sql: list[str] = []
+        self.params: list[Mapping[str, Any]] = []
 
     def query(
         self,
@@ -1152,6 +1153,7 @@ class _SpanAuditClient:
         assert timeout_ms > 0
         assert settings["readonly"] == 2
         self.sql.append(sql)
+        self.params.append(_params)
         return (
             {
                 "source_count": 1,
@@ -1168,7 +1170,7 @@ class _SpanAuditClient:
         )
 
 
-def test_source_audit_is_one_select_and_matches_paged_multiset_components() -> None:
+def test_source_audit_is_one_select_per_project_and_matches_paged_components() -> None:
     client = _SpanAuditClient()
     reader = CanonicalSpanSourceReader(
         client,
@@ -1189,10 +1191,79 @@ def test_source_audit_is_one_select_and_matches_paged_multiset_components() -> N
 
     assert proof.digest == accumulator.proof.digest
     assert len(client.sql) == 1
+    assert client.params[0]["catalog_project_ids"] == (PROJECT,)
     assert "groupBitXor(audit_h1)" in client.sql[0]
     assert "state_conflict_count" in client.sql[0]
     assert "_version <= %(catalog_source_version_fence)s" not in client.sql[0]
     assert SPAN_AUDIT_CUTOFF_LABEL == "clickhouse_audit_generation"
+
+
+def test_source_audit_combines_disjoint_project_proofs_with_uint64_wrap() -> None:
+    class Client(_SpanAuditClient):
+        def query(
+            self,
+            sql: str,
+            params: Mapping[str, Any],
+            *,
+            timeout_ms: int,
+            settings: Mapping[str, Any],
+        ) -> Sequence[Mapping[str, Any]]:
+            super().query(
+                sql,
+                params,
+                timeout_ms=timeout_ms,
+                settings=settings,
+            )
+            project_ids = params["catalog_project_ids"]
+            assert isinstance(project_ids, tuple) and len(project_ids) == 1
+            if project_ids == (PROJECT,):
+                components = (10, 20, 30, 40)
+                count = 1
+                conflicts = 0
+            else:
+                assert project_ids == (OTHER_PROJECT,)
+                components = ((1 << 64) - 5, 7, 9, 11)
+                count = 2
+                conflicts = 1
+            return (
+                {
+                    "source_count": count,
+                    **{
+                        f"audit_h{index}_xor": value
+                        for index, value in enumerate(components, start=1)
+                    },
+                    **{
+                        f"audit_h{index}_sum": value
+                        for index, value in enumerate(components, start=1)
+                    },
+                    "state_conflict_count": conflicts,
+                },
+            )
+
+    client = Client()
+    reader = CanonicalSpanSourceReader(
+        client,
+        source_database="source_ch25",
+        catalog_database=DATABASE,
+        deadline=SharedCatalogDeadline(wall_ms=8_500),
+    )
+    frozen = FrozenSpanSource(
+        (OTHER_PROJECT, PROJECT),
+        datetime(2026, 8, 14, 12, tzinfo=UTC),
+        datetime(2026, 8, 14, 13, tzinfo=UTC),
+        77,
+    )
+
+    proof = reader.audit(frozen)
+
+    assert [params["catalog_project_ids"] for params in client.params] == [
+        (PROJECT,),
+        (OTHER_PROJECT,),
+    ]
+    assert proof.count == 3
+    assert proof.xor == (10 ^ ((1 << 64) - 5), 20 ^ 7, 30 ^ 9, 40 ^ 11)
+    assert proof.total == (5, 27, 39, 51)
+    assert proof.state_conflict_count == 1
 
 
 def test_project_move_changes_every_paged_and_aggregate_audit_hash_input() -> None:
