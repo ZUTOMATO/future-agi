@@ -56,12 +56,12 @@ from tracer.services.clickhouse.v2.property_catalog.span_source import (
     _paged_payload_with_audit_sql,
 )
 from tracer.services.clickhouse.v2.property_catalog.state_store import (
-    ClickHouseCatalogStateStore,
-    ClickHouseCurrentBindingReader,
-    PropertyCatalogStateConflict,
     _ACTIVATION_COLUMNS,
     _CHECKPOINT_LOGICAL_COLUMNS,
     _SOURCE_STREAM_AUDIT_COLUMNS,
+    ClickHouseCatalogStateStore,
+    ClickHouseCurrentBindingReader,
+    PropertyCatalogStateConflict,
     _activation,
     _activation_row,
     _active_lineage,
@@ -1170,7 +1170,8 @@ class _SpanAuditClient:
         )
 
 
-def test_source_audit_is_one_select_per_project_and_matches_paged_components() -> None:
+def test_source_audit_is_one_select_per_bounded_shard_and_matches_paged_components(
+) -> None:
     client = _SpanAuditClient()
     reader = CanonicalSpanSourceReader(
         client,
@@ -1196,6 +1197,32 @@ def test_source_audit_is_one_select_per_project_and_matches_paged_components() -
     assert "state_conflict_count" in client.sql[0]
     assert "_version <= %(catalog_source_version_fence)s" not in client.sql[0]
     assert SPAN_AUDIT_CUTOFF_LABEL == "clickhouse_audit_generation"
+
+
+def test_source_audit_splits_one_large_project_into_weekly_time_shards() -> None:
+    client = _SpanAuditClient()
+    reader = CanonicalSpanSourceReader(
+        client,
+        source_database="source_ch25",
+        catalog_database=DATABASE,
+        deadline=SharedCatalogDeadline(wall_ms=8_500),
+    )
+    since = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    split = since + timedelta(days=7)
+    until = since + timedelta(days=8)
+    frozen = FrozenSpanSource((PROJECT,), since, until, 77)
+
+    proof = reader.audit(frozen)
+
+    assert proof.count == 2
+    assert [params["catalog_project_ids"] for params in client.params] == [
+        (PROJECT,),
+        (PROJECT,),
+    ]
+    assert [
+        (params["catalog_since"], params["catalog_until"])
+        for params in client.params
+    ] == [(since, split), (split, until)]
 
 
 def test_source_audit_combines_disjoint_project_proofs_with_uint64_wrap() -> None:

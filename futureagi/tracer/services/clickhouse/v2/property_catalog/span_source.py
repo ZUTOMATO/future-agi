@@ -750,60 +750,82 @@ class CanonicalSpanSourceReader:
         return parsed, observations
 
     def audit(self, frozen: FrozenSpanSource) -> SpanAggregateProof:
-        """Independently audit each project and combine its multiset proof."""
+        """Independently audit bounded project/time shards and combine proof."""
 
         # A workspace-wide aggregate makes ClickHouse account every project's
         # physical reads against one max_bytes_to_read budget.  Keep the same
         # independent aggregate proof, but execute it once per disjoint project
-        # scope so one large workspace cannot exhaust that per-query ceiling.
-        # Project ID is part of every audited hash, so XOR and wrapping UInt64
-        # sums compose to exactly the same workspace multiset proof.
+        # and weekly time scope.  Project sharding bounds workspace fan-in;
+        # time sharding also keeps one individually large project below the
+        # fixed interactive query deadline.  The authoritative scan uses the
+        # same half-open weekly windows, and project ID is part of every audited
+        # hash, so XOR and wrapping UInt64 sums compose to exactly the same
+        # workspace multiset proof.
         sql = _aggregate_audit_sql(self._source_table())
         count = 0
         xor = [0, 0, 0, 0]
         total = [0, 0, 0, 0]
         state_conflict_count = 0
+        occupied_hours = (
+            self._occupied_hours if self._occupied_frozen == frozen else None
+        )
         for project_id in frozen.project_ids:
-            rows = self._query(
-                sql,
-                {
-                    "catalog_project_ids": (project_id,),
-                    "catalog_since": frozen.since,
-                    "catalog_until": frozen.until,
-                    "catalog_projected_typed_string_value_bytes": PROJECTED_TYPED_STRING_VALUE_BYTES,
-                    "catalog_projected_array_string_value_bytes": PROJECTED_ARRAY_STRING_VALUE_BYTES,
-                    "catalog_projected_value_budget_bytes": PROJECTED_VALUE_BUDGET_BYTES,
-                    "catalog_projected_array_members": CATALOG_BUILD_LIMITS.max_array_members,
-                    "catalog_max_source_attribute_entries": self._limits.max_source_attribute_entries,
-                    "catalog_max_source_attribute_bytes": self._limits.max_source_attribute_bytes,
-                },
-            )
-            if len(rows) != 1:
-                raise PropertyCatalogSpanSourceError(
-                    "canonical-span project audit did not return one row"
+            window_start = frozen.since
+            while window_start < frozen.until:
+                window_end = min(
+                    window_start
+                    + timedelta(hours=CANONICAL_SPAN_SCAN_WINDOW_HOURS),
+                    frozen.until,
                 )
-            row = rows[0]
-            count += _strict_uint(row.get("source_count"), "audit source_count")
-            state_conflict_count += _strict_uint(
-                row.get("state_conflict_count"), "state conflict count"
-            )
-            _strict_uint(count, "combined audit source_count")
-            _strict_uint(
-                state_conflict_count,
-                "combined state conflict count",
-            )
-            for index in range(1, 5):
-                xor[index - 1] ^= _strict_uint(
-                    row.get(f"audit_h{index}_xor"),
-                    f"audit h{index} xor",
+                if occupied_hours is not None and not _unit_may_be_occupied(
+                    occupied_hours,
+                    project_id=project_id,
+                    window_start=window_start,
+                    window_end=window_end,
+                ):
+                    window_start = window_end
+                    continue
+                rows = self._query(
+                    sql,
+                    {
+                        "catalog_project_ids": (project_id,),
+                        "catalog_since": window_start,
+                        "catalog_until": window_end,
+                        "catalog_projected_typed_string_value_bytes": PROJECTED_TYPED_STRING_VALUE_BYTES,
+                        "catalog_projected_array_string_value_bytes": PROJECTED_ARRAY_STRING_VALUE_BYTES,
+                        "catalog_projected_value_budget_bytes": PROJECTED_VALUE_BUDGET_BYTES,
+                        "catalog_projected_array_members": CATALOG_BUILD_LIMITS.max_array_members,
+                        "catalog_max_source_attribute_entries": self._limits.max_source_attribute_entries,
+                        "catalog_max_source_attribute_bytes": self._limits.max_source_attribute_bytes,
+                    },
                 )
-                total[index - 1] = (
-                    total[index - 1]
-                    + _strict_uint(
-                        row.get(f"audit_h{index}_sum"),
-                        f"audit h{index} sum",
+                if len(rows) != 1:
+                    raise PropertyCatalogSpanSourceError(
+                        "canonical-span audit shard did not return one row"
                     )
-                ) % (1 << 64)
+                row = rows[0]
+                count += _strict_uint(row.get("source_count"), "audit source_count")
+                state_conflict_count += _strict_uint(
+                    row.get("state_conflict_count"), "state conflict count"
+                )
+                _strict_uint(count, "combined audit source_count")
+                _strict_uint(
+                    state_conflict_count,
+                    "combined state conflict count",
+                )
+                for index in range(1, 5):
+                    xor[index - 1] ^= _strict_uint(
+                        row.get(f"audit_h{index}_xor"),
+                        f"audit h{index} xor",
+                    )
+                    total[index - 1] = (
+                        total[index - 1]
+                        + _strict_uint(
+                            row.get(f"audit_h{index}_sum"),
+                            f"audit h{index} sum",
+                        )
+                    ) % (1 << 64)
+                window_start = window_end
         return SpanAggregateProof(
             count=count,
             xor=tuple(xor),  # type: ignore[arg-type]
