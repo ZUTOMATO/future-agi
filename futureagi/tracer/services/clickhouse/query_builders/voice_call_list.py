@@ -292,6 +292,31 @@ class VoiceCallListQueryBuilder(BaseQueryBuilder):
 
         return self._bounded_delegate().recommended_filter_seed_batch_size()
 
+    def recommended_filter_cursor_seed_batch_size(self) -> int:
+        """Amortize sparse voice cursor scans without widening one classifier.
+
+        A cursor used to force every generic root seed down to ``page_size + 1``.
+        For a 15-row page that meant two ClickHouse statements per 16 roots,
+        even though the identity classifier is explicitly chunked and can
+        safely consume a larger finite seed. Keep structured/JSON filters to
+        four qualified classifier chunks and allow lighter filters eight; the
+        selector still enforces its query, candidate, memory, byte and wall
+        limits and checkpoints only fully classified roots.
+        """
+
+        delegate = self._bounded_delegate()
+        classify_batch_size = int(self.recommended_filter_classify_batch_size() or 50)
+        expensive_classifier = bool(
+            delegate._custom_span_attribute_filter_count()
+            or delegate._unindexed_positive_micro_seed_plan() is not None
+        )
+        classifier_chunks = 4 if expensive_classifier else 8
+        requested = max(
+            self.page_size + 1,
+            classify_batch_size * classifier_chunks,
+        )
+        return min(self.recommended_filter_seed_batch_size(), requested)
+
     def recommended_filter_query_timeout_ms(self) -> int | None:
         """Share the public endpoint's 9.5-second wall across required reads."""
 

@@ -936,7 +936,6 @@ def read_bounded_filter_page(
     )
     if (
         bounded_continuation
-        and candidate_seed_can_run
         and callable(cursor_seed_batch_recommendation)
         and cursor_seed_batch_recommendation() is not None
     ):

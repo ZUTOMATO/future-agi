@@ -936,9 +936,7 @@ def test_voice_annotator_and_turn_count_use_positive_candidate_seed() -> None:
         limit=26,
     )
     compact_sql = " ".join(sql.split())
-    match_sql, match_params = builder.build_filter_match_query(
-        ["trace-a", "trace-b"]
-    )
+    match_sql, match_params = builder.build_filter_match_query(["trace-a", "trace-b"])
 
     assert builder.supports_filter_candidate_seed_page() is True
     assert builder.recommended_filter_initial_slice_width() == END - START
@@ -1232,9 +1230,7 @@ def test_conjoined_positive_relation_seeds_then_reclassifies_every_filter() -> N
         slice_end=END,
         limit=26,
     )
-    match_sql, match_params = builder.build_filter_match_query(
-        ["trace-a", "trace-b"]
-    )
+    match_sql, match_params = builder.build_filter_match_query(["trace-a", "trace-b"])
 
     assert builder.supports_filter_candidate_seed_page() is True
     assert "tracer_eval_logger_v2 AS eval_scan" in seed_sql
@@ -1462,9 +1458,7 @@ def test_voice_eval_value_filter_uses_project_scoped_positive_candidate_seed(
         project_id=PROJECT_ID,
         filters=[_time_filter(), eval_filter],
         eval_config_ids=[config_id],
-        eval_filter_metadata={
-            config_id: EvalFilterMetadata((config_id,), "PASS_FAIL")
-        },
+        eval_filter_metadata={config_id: EvalFilterMetadata((config_id,), "PASS_FAIL")},
     )
 
     seed_sql, seed_params = builder.build_filter_candidate_seed_page(
@@ -1474,9 +1468,7 @@ def test_voice_eval_value_filter_uses_project_scoped_positive_candidate_seed(
         before_start_time=END - timedelta(minutes=1),
         before_id="trace-z",
     )
-    match_sql, match_params = builder.build_filter_match_query(
-        ["trace-a", "trace-b"]
-    )
+    match_sql, match_params = builder.build_filter_match_query(["trace-a", "trace-b"])
 
     comparison = "NOT IN" if operation == "not_in" else "IN"
     assert builder.supports_filter_candidate_seed_page() is True
@@ -1517,9 +1509,7 @@ def test_voice_eval_and_annotator_conjunction_prefers_score_seed_and_rechecks_ev
             _annotator_filter(annotator_id),
         ],
         eval_config_ids=[config_id],
-        eval_filter_metadata={
-            config_id: EvalFilterMetadata((config_id,), "PASS_FAIL")
-        },
+        eval_filter_metadata={config_id: EvalFilterMetadata((config_id,), "PASS_FAIL")},
     )
 
     seed_sql, seed_params = builder.build_filter_candidate_seed_page(
@@ -6272,6 +6262,15 @@ class _CursorPageFillIdentityHydrationFakeBuilder(_IdentityHydrationFakeBuilder)
 
 
 @dataclass
+class _WideGenericCursorIdentityHydrationFakeBuilder(
+    _CursorPageFillIdentityHydrationFakeBuilder
+):
+    @staticmethod
+    def recommended_filter_cursor_seed_batch_size() -> int:
+        return 80
+
+
+@dataclass
 class _NewestPartitionTraceFakeBuilder(_IdentityHydrationFakeBuilder):
     """Model the default trace list's tail-first adaptive traversal."""
 
@@ -10988,6 +10987,46 @@ def test_opted_in_identity_cursor_fills_across_classified_slices() -> None:
     assert page.has_more is False
     assert page.continuation_slice_end is None
     assert [attempt.kind for attempt in page.attempts].count("hydrate") == 1
+
+
+def test_generic_cursor_honors_explicit_wider_seed_recommendation() -> None:
+    request_start = END - timedelta(hours=2)
+    rows = [
+        {
+            "id": f"trace-{index:03d}",
+            "root_span_id": f"root-{index:03d}",
+            "start_time": END - timedelta(minutes=index + 1),
+        }
+        for index in range(80)
+    ]
+    builder = _WideGenericCursorIdentityHydrationFakeBuilder(
+        rows,
+        start=request_start,
+        end=END,
+        recommended_batch_size=10,
+        recommended_seed_batch_size=10,
+    )
+    executor = _IdentityHydrationFakeExecutor(builder)
+
+    page = read_bounded_filter_page(
+        builder=builder,
+        analytics=executor,
+        filters=[_time_filter(request_start, END)],
+        key_field="id",
+        page_number=0,
+        page_size=15,
+        deadline_ms=5_000,
+        max_seed_attempts=24,
+        max_candidates=100,
+        max_query_count=50,
+        classify_batch_size=10,
+        include_incomplete_rows=True,
+        bounded_continuation=True,
+    )
+
+    assert page.complete is True
+    assert executor.calls[0][0] == "seed"
+    assert executor.calls[0][1]["limit"] == 80
 
 
 def test_sparse_identity_cursor_waits_for_the_whole_active_slice() -> None:
