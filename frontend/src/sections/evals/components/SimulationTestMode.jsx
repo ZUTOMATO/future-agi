@@ -355,7 +355,11 @@ const SimulationTestMode = React.forwardRef(
           // `page_size`, as the page-size query param. Sending
           // `page_size` silently falls back to the 10-item default and
           // the dropdown maxed out at 10 rows regardless of scroll.
-          params: { page: pageNum, limit: RUN_TESTS_PAGE_SIZE },
+          params: {
+            page: pageNum,
+            limit: RUN_TESTS_PAGE_SIZE,
+            summary: true,
+          },
           signal: controller.signal,
           timeout: 9000,
         });

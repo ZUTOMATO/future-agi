@@ -103,6 +103,7 @@ from simulate.serializers.response.test_execution import (
     RerunCallsResponseSerializer,
 )
 from simulate.serializers.run_test import (
+    RunTestListSummarySerializer,
     RunTestSerializer,
 )
 from simulate.serializers.test_execution import (
@@ -294,6 +295,54 @@ def _run_test_read_queryset(queryset):
             queryset=version_queryset,
             to_attr="_prefetched_versions",
         ),
+    )
+
+
+def _run_test_summary_queryset(queryset):
+    """Load only relations and columns rendered by run-test list cards."""
+
+    row_count_subquery = (
+        Row.objects.filter(dataset=OuterRef("dataset"), deleted=False)
+        .values("dataset")
+        .annotate(count=Count("id"))
+        .values("count")
+    )
+    scenario_queryset = Scenarios.objects.annotate(
+        _dataset_row_count=Subquery(row_count_subquery)
+    ).only(
+        "id",
+        "name",
+        "description",
+        "scenario_type",
+        "dataset_id",
+    )
+    eval_config_queryset = SimulateEvalConfig.objects.select_related("eval_group").only(
+        "id",
+        "run_test_id",
+        "name",
+        "model",
+        "status",
+        "eval_group_id",
+        "eval_group__name",
+    )
+    return (
+        queryset.select_related("agent_definition")
+        .only(
+            "id",
+            "name",
+            "source_type",
+            "agent_definition_id",
+            "created_at",
+            "agent_definition__id",
+            "agent_definition__agent_name",
+            "agent_definition__agent_type",
+            "agent_definition__provider",
+            "agent_definition__contact_number",
+        )
+        .prefetch_related(
+            Prefetch("scenarios", queryset=scenario_queryset),
+            Prefetch("simulate_eval_configs", queryset=eval_config_queryset),
+        )
     )
 
 
@@ -492,6 +541,7 @@ class RunTestListView(APIView):
             'agent_definition' or 'prompt')
         - prompt_template_id: filter by prompt template ID (used when
             simulation_type is 'prompt')
+        - summary: return the bounded list-card representation
         """
         try:
             # Get the organization of the logged-in user
@@ -506,15 +556,19 @@ class RunTestListView(APIView):
             search_query = query_data.get("search", "").strip()
             simulation_type = query_data.get("simulation_type", "").strip()
             prompt_template_id = query_data.get("prompt_template_id")
+            summary = query_data.get("summary", False)
 
             # Filter run tests by organization (only non-deleted)
             # Prefetch simulate_eval_configs to avoid N+1 in serializer's to_representation
             # Prefetch agent_definition__versions for latest_version lookup (ordered by version_number desc)
-            run_tests = _run_test_read_queryset(
-                RunTest.objects.filter(
-                    organization=user_organization,
-                    deleted=False,
-                )
+            run_tests = RunTest.objects.filter(
+                organization=user_organization,
+                deleted=False,
+            )
+            run_tests = (
+                _run_test_summary_queryset(run_tests)
+                if summary
+                else _run_test_read_queryset(run_tests)
             )
 
             # Apply simulation_type filter using RunTest.SourceTypes enum
@@ -548,7 +602,10 @@ class RunTestListView(APIView):
             result_page = paginator.paginate_queryset(run_tests, request)
 
             # Serialize the data
-            serializer = RunTestSerializer(result_page, many=True)
+            serializer_class = (
+                RunTestListSummarySerializer if summary else RunTestSerializer
+            )
+            serializer = serializer_class(result_page, many=True)
 
             # Return paginated response
             return paginator.get_paginated_response(serializer.data)
@@ -1352,6 +1409,7 @@ class RunTestAPIView(APIView):
         - search: search string to filter run tests by name
         - limit: number of items per page (default: 10)
         - page: page number (default: 1)
+        - summary: return the bounded list-card representation
         """
         try:
             # Get the organization of the logged-in user
@@ -1362,14 +1420,19 @@ class RunTestAPIView(APIView):
             if not user_organization:
                 return _gm.not_found("Organization not found for the user.")
 
-            search_query = request.validated_query_data.get("search", "").strip()
+            query_data = request.validated_query_data
+            search_query = query_data.get("search", "").strip()
+            summary = query_data.get("summary", False)
 
             # Filter run tests by organization (only non-deleted)
-            run_tests = _run_test_read_queryset(
-                RunTest.objects.filter(
-                    organization=user_organization,
-                    deleted=False,
-                )
+            run_tests = RunTest.objects.filter(
+                organization=user_organization,
+                deleted=False,
+            )
+            run_tests = (
+                _run_test_summary_queryset(run_tests)
+                if summary
+                else _run_test_read_queryset(run_tests)
             )
 
             # Apply search filter if search query is provided
@@ -1381,6 +1444,11 @@ class RunTestAPIView(APIView):
                     | models.Q(agent_definition__agent_name__regex=pattern)
                 )
 
+            if summary:
+                run_tests = run_tests.annotate(
+                    last_run_at=Max("executions__created_at")
+                )
+
             # Order by creation date (newest first)
             run_tests = run_tests.order_by("-created_at")
 
@@ -1389,7 +1457,10 @@ class RunTestAPIView(APIView):
             result_page = paginator.paginate_queryset(run_tests, request)
 
             # Serialize the data
-            serializer = RunTestSerializer(result_page, many=True)
+            serializer_class = (
+                RunTestListSummarySerializer if summary else RunTestSerializer
+            )
+            serializer = serializer_class(result_page, many=True)
 
             # Return paginated response
             return paginator.get_paginated_response(serializer.data)

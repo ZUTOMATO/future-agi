@@ -226,6 +226,11 @@ describe("SimulationTestMode exact snapshot pagination", () => {
     )[1];
     expect(firstListConfig.timeout).toBe(9000);
     expect(firstListConfig.signal).toBeInstanceOf(AbortSignal);
+    expect(firstListConfig.params).toEqual({
+      page: 1,
+      limit: 50,
+      summary: true,
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Retry simulations" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());

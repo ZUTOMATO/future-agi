@@ -36,6 +36,14 @@ class RunTestFilterSerializer(StrictInputSerializer):
         required=False, default=1, min_value=1, max_value=100
     )
     limit = serializers.IntegerField(required=False, min_value=1, max_value=100)
+    summary = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text=(
+            "Return the bounded list-card representation instead of the full "
+            "nested run-test detail payload."
+        ),
+    )
 
 
 class PromptSimulationListQuerySerializer(StrictInputSerializer):
