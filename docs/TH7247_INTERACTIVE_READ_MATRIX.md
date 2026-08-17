@@ -1,24 +1,20 @@
 # TH-7247 interactive read matrix
 
-> **Full API inventory; historical evidence anchors.** This document inventories
+> **Full API inventory; current DEV evidence plus historical anchors.** This document inventories
 > the registered changed public-action surface and known frontend consumers,
 > grouping non-Cartesian workflow routes where they share a contract. The
-> current 2026-08-15 working-tree freeze contains the unified definition
-> catalog, value routing, frontend consumers, and durable ingestion lifecycle.
-> The last verified DEV evidence preserves the isolated six-table `0815i`
-> catalog and raw activation counts. A later canonical PostgreSQL ownership
-> audit found that a requested catalog tenant did not own every allowlisted
-> source project and stopped before qualifier API callbacks. That failure
-> invalidates the earlier unrouted metrics/filter-values smoke as tenant-valid
-> functional or release-qualification evidence. The next approved plan uses
-> canonical source database `futureagi` and fresh isolated target
-> `th7247_catalog_dev_kartik_0816d`; source and target must differ, and existing
-> application tables are not altered. Its current remote state is deliberately
-> unclaimed pending read-only reinspection. No production deployment or local
-> customer-data copy is part of this freeze. The required Whatfix dense,
-> Colektia sparse, and Mudflap voice projects did not resolve in the last
-> verified DEV preflight, so their current-source matrix remains unrun.
-> Linked runtime measurements are historical and do not qualify this freeze. See
+> current 2026-08-17 freeze contains the unified definition catalog, value
+> routing, frontend consumers, and durable ingestion lifecycle. The reviewed
+> DEV deployment reads canonical source `futureagi`, writes only the fresh
+> six-table target `th7247_catalog_dev_kartik_0817j`, and is allowlisted to the
+> one canonical Kartik organization/workspace containing 33 projects. Epoch 14,
+> revision 1 activated 9,383 live definitions, 261 tombstones, and 659,148
+> unique semantic value states after 35,586 source rows emitted 941,080 Kafka
+> value rows. All expected stream fences are complete with zero gaps, poison, or
+> conflicts. Source reads remained SELECT-only and no existing application
+> table/data was changed. No production deployment or local customer-data copy
+> is part of this freeze. The formal Whatfix dense, Colektia sparse, and Mudflap
+> voice matrix remains unrun, so the DEV smoke is not a production sign-off. See
 > [`TH-7247_PROPERTY_API_MATRIX.md`](TH-7247_PROPERTY_API_MATRIX.md) for the
 > smaller SELECT-only release gate and its pending production targets. No
 > Kartik account data has been copied into a local fixture, so no account-specific
@@ -35,9 +31,10 @@ builder test alone is never treated as endpoint-latency proof.
 | Method and path                                                                    | Exact/current behavior                                                                                                                                                                                                                                                       | Read-more and deadline                                                                                                                                                                 | Frontend consumer                                                                                                                                       | Qualification state                                                                                                                                                                           |
 | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /api/traces/span-attribute-keys/`                                             | Retained attribute-only compatibility discovery; it is not the unified definition source.                                                                                                                                                                                    | Signed `page_size<=50` cursor and four-second wall.                                                                                                                                    | Eval mapping, Run Insights, and compatibility/fallback attribute flows.                                                                                 | Unit/contract green; not exercised by the historical isolated `0815i` smoke or a current named matrix.                                                                                        |
-| `GET /tracer/dashboard/metrics/?cursor_mode=true`                                  | Unified Property Registry response: authorized system, custom attribute, eval template/config, annotation, and dataset-column definitions come from one activated `property_definition_catalog` and carry stable `property_id`/`property_kind`.                              | Signed keyset `page_size<=50` cursor bound to scope, filters, epoch, revision, and activation; 8.5-second endpoint wall; no expensive exact total.                                     | `usePropertyCatalog` consumers across Trace/Span/Voice/Session/User, Primary Graph, widgets, Journey Attributes, automation rules, and dataset pickers. | Historical `0815i` smoke returned disjoint pages, but the later canonical tenant mismatch invalidates it as functional qualification; named scale evidence remains pending.                   |
-| `GET /tracer/dashboard/filter_values/`                                             | Accepts `property_id`, verifies any legacy name/type beside it, and dispatches to the authorized native adapter. `system_attribute:traces:model` and `custom_attribute:model` remain separate identities; categorical annotation values retain the configured+stored union.  | Signed `page_size<=50` cursor; fixed and large project scopes; four-second server wall. Dataset-column pickers expose the advancing cursor as an explicit **Load more values** action. | Trace/Voice Basic and Query pickers, ComplexFilter, widgets and saved-value hydration, tasks/alerts/annotation queues, and dataset-column pickers.      | Historical `0815i` smoke returned a nonempty Model-value page, but the later canonical tenant mismatch invalidates it as functional qualification; named/filter-matrix scale remains pending. |
+| `GET /tracer/dashboard/metrics/?cursor_mode=true`                                  | Unified Property Registry response: authorized system, custom attribute, eval template/config, annotation, and dataset-column definitions come from one activated `property_definition_catalog` and carry stable `property_id`/`property_kind`.                              | Signed keyset `page_size<=50` cursor bound to scope, filters, epoch, revision, and activation; 8.5-second endpoint wall; no expensive exact total.                                     | `usePropertyCatalog` consumers across Trace/Span/Voice/Session/User, Primary Graph, widgets, Journey Attributes, automation rules, and dataset pickers. | Current `0817j` Kartik DEV smoke passed project scope, search, disjoint continuation, and all listed picker families; the formal named scale matrix remains pending.                           |
+| `GET /tracer/dashboard/filter_values/`                                             | Accepts `property_id`, verifies any legacy name/type beside it, and dispatches to the authorized native adapter. `system_attribute:traces:model` and `custom_attribute:model` remain separate identities; categorical annotation values retain the configured+stored union.  | Signed `page_size<=50` cursor; fixed and large project scopes; four-second server wall. Dataset-column pickers expose the advancing cursor as an explicit **Load more values** action. | Trace/Voice Basic and Query pickers, ComplexFilter, widgets and saved-value hydration, tasks/alerts/annotation queues, and dataset-column pickers.      | Current `0817j` Kartik DEV smoke passed Model/custom-attribute value search and project-owned eval/annotation scoping; the formal named filter matrix remains pending.                         |
 | `GET /model-hub/develops/{dataset_id}/get-dataset-table/`                          | `exact_snapshot` mode uses a per-dataset ready-gated O(1) revision ledger, deterministic row/column order, and drift rejection. Migration `0124` performs no historical aggregate; an online bounded command publishes each dataset while serialized with mutation triggers. | Signed cursor; one explicit 100-row FE page/action (server maximum 500); 8.5-second server/9-second FE wall; hard column/cell/byte caps; unready ledgers fail closed with `503`.       | Eval Ground Truth import, held from rollout until `backfill_dataset_table_revision_ledgers --audit-only --gate` passes.                                 | Non-DB tests/contracts green; PostgreSQL migration/trigger concurrency smoke remains required.                                                                                                |
+| `GET /simulate/run-tests/?summary=true`                                            | Compact selector serialization excludes nested execution/call payloads while retaining run-test identity and configuration.                                                                                                                                                  | Numbered `page`/`limit`, `limit<=100`, one 9.5-second wall.                                                                                                                             | Run Simulation and Eval Settings simulation selectors.                                                                                                     | Current DEV returned 25 rows in 103 ms and 50 rows in 120 ms; both selectors rendered without the prior unavailable state.                                                                    |
 | `GET /simulate/run-tests/{run_test_id}/preview-executions/`                        | Exact snapshot-bound execution preview.                                                                                                                                                                                                                                      | Signed keyset cursor, `page_size<=50`, explicit Load more, 8.5/9-second wall.                                                                                                          | Simulation test mode.                                                                                                                                   | Non-DB tests/contracts green; PostgreSQL MVCC integration smoke remains required.                                                                                                             |
 | `GET /simulate/test-executions/{test_execution_id}/preview-calls/?run_test_id=...` | Exact call preview bound to the selected run test and tenant scope.                                                                                                                                                                                                          | Same cursor/deadline contract; drift returns restart-required `409`.                                                                                                                   | Simulation test mode.                                                                                                                                   | Non-DB tests/contracts green; PostgreSQL MVCC integration smoke remains required.                                                                                                             |
 | `PUT/PATCH /model-hub/annotations-labels/{id}/`                                    | Label type is immutable, preserving categorical-projection semantics.                                                                                                                                                                                                        | Point mutation; no list window.                                                                                                                                                        | Annotation label editors.                                                                                                                               | Serializer/static contract green; DB trigger smoke required.                                                                                                                                  |
@@ -94,17 +91,24 @@ schema-contract, and deployment/schedule gate, plus an 84-test offline qualifier
 suite: 72 qualification-contract tests, five assembly tests, and seven safety
 tests. The
 Go property catalog package also passes in normal, race, and vet modes. The
-preserved `0815i` evidence records 2,330 live definitions, 1,612 tombstones, and
-218,306 semantic values in one raw activation. Its earlier callback smoke
-returned two disjoint five-definition pages plus nonempty Model values, and the
-query-log delta was 34 SELECTs and zero non-SELECT statements. These counts and
-mechanics remain useful failure evidence, but the later canonical PostgreSQL
-tenant mismatch invalidates the activation as tenant-valid functional or
-release-qualification evidence. The approved `0816d` retry plan is pending a
-read-only remote-state inspection; this document does not infer whether any of
-its resources exist. The named dense/sparse/voice scale matrix also remains
-pending. No account data was copied locally or to production, and historical
-evidence does not qualify the current source freeze.
+current `0817j` evidence records 9,383 live definitions, 261 tombstones, and
+659,148 unique semantic values in one activated build. The 33-project ownership
+proof, ten populated stream fences, zero-sequence reservation, and delivery
+audit all passed. Interactive Kartik DEV coverage includes Observe Trace/Span
+property/value search and pagination, Primary Graph, Eval Settings, annotation
+automation, dashboard/widget pickers, dataset selection, and both simulation
+selectors. The latest picker regression pass is 135/135. The named
+dense/sparse/voice scale matrix remains pending. No account data was copied
+locally or to production.
+
+Exact graph preparation is deployed on a dedicated additive
+`exact_aggregation` Temporal worker from the matching core/EE stack. The prior
+shared `tasks_xl` worker did not register
+`tracer.refresh_exact_aggregation_snapshot`, which caused the observed pending
+graph and dashboard error states. A fresh filtered graph completed the activity
+successfully; individual ClickHouse SELECTs took 4.12–49.84 ms and the full
+activity took about 0.3 seconds. The existing shared worker and database were
+not changed.
 
 The final current-tree integration pass additionally covers 200 request-wall
 and error-boundary tests, 166 bounded experiment/simulation/eval-task/
@@ -146,8 +150,10 @@ this is structural contract evidence, not production-latency evidence.
 
 ### Exact live-qualifier boundary
 
-No operation has an exact-current-source live result at this freeze. The
-SELECT-only harness schedules 14 route callbacks: 13 of the 65 changed
+No operation has a complete formal exact-current-source matrix result at this
+freeze. The Kartik `0817j` DEV smokes above are current functional evidence but
+do not replace the named matrix. The SELECT-only harness schedules 14 route
+callbacks: 13 of the 65 changed
 operations plus the adjacent `GET /tracer/users/` route. Therefore the 13
 scheduled changed operations are still live-pending, and the following **52
 changed operations are not executed by the live qualifier at all**:
