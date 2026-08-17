@@ -16,6 +16,9 @@ from tracer.services.clickhouse.v2.attribute_catalog_backfill import (
     SourceSpan,
 )
 from tracer.services.clickhouse.v2.property_catalog.models import SourceAdapter
+from tracer.services.clickhouse.v2.property_catalog.projection import (
+    PostgresSnapshotContext,
+)
 from tracer.services.clickhouse.v2.property_catalog.publisher import (
     SharedCatalogDeadline,
 )
@@ -23,6 +26,10 @@ from tracer.services.clickhouse.v2.property_catalog.qualification import (
     CheckpointStatus,
 )
 from tracer.services.clickhouse.v2.property_catalog.reconciler import CheckpointWrite
+from tracer.services.clickhouse.v2.property_catalog.source_adapters import (
+    PropertySourceError,
+    SourceKeysetCursor,
+)
 from tracer.services.clickhouse.v2.property_catalog.span_source import (
     AUTHORITATIVE_VALUE_BATCH_MAX_BYTES,
     AUTHORITATIVE_VALUE_BATCH_MAX_ROWS,
@@ -36,6 +43,7 @@ from tracer.services.clickhouse.v2.property_catalog.span_source import (
     CanonicalSpanSourceReader,
     FrozenSpanSource,
     PropertyCatalogSpanSourceError,
+    RevisionPinnedSpanAttributeGroupPageLoader,
     SpanAggregateProof,
     SpanAuditAccumulator,
     SpanScanCursor,
@@ -121,6 +129,151 @@ class _FixedDeadline:
     def remaining_ms(self, *, cap_ms: int = 8_500) -> int:
         self.caps.append(cap_ms)
         return min(self.remaining, cap_ms)
+
+
+class _CatalogGroupClient:
+    catalog_database = CATALOG_DATABASE
+
+    def __init__(self, rows: Sequence[Mapping[str, Any]]) -> None:
+        self.rows = tuple(rows)
+        self.calls: list[tuple[str, dict[str, Any], int]] = []
+
+    def query(
+        self,
+        sql: str,
+        params: Mapping[str, Any],
+        *,
+        timeout_ms: int,
+    ) -> Sequence[Mapping[str, Any]]:
+        self.calls.append((sql, dict(params), timeout_ms))
+        return self.rows
+
+
+def _catalog_group_context() -> PostgresSnapshotContext:
+    return PostgresSnapshotContext(
+        organization_id=ORG,
+        workspace_id=WORKSPACE,
+        project_ids=(PROJECT_A, PROJECT_B),
+        catalog_epoch=11,
+        catalog_revision=12,
+        projection_version=1,
+        snapshot_cutoff=datetime(2026, 8, 17, 2, 30, tzinfo=UTC),
+    )
+
+
+def test_revision_pinned_group_loader_reads_the_exact_build_once_and_paginates() -> (
+    None
+):
+    context = _catalog_group_context()
+    first_seen = datetime(2026, 1, 1, 1)
+    last_seen = datetime(2026, 8, 16, 23, 59, 59)
+    client = _CatalogGroupClient(
+        (
+            {
+                "attribute_key": "alpha",
+                "observed_types": ("string", "number"),
+                "project_ids": (PROJECT_A, PROJECT_B),
+                "first_seen": first_seen,
+                "last_seen": last_seen,
+            },
+            {
+                "attribute_key": "beta",
+                "observed_types": ("boolean",),
+                "project_ids": (PROJECT_B,),
+                "first_seen": first_seen,
+                "last_seen": last_seen,
+            },
+        )
+    )
+    deadline = _FixedDeadline(7_000)
+    loader = RevisionPinnedSpanAttributeGroupPageLoader(
+        client,
+        context=context,
+        build_token=BUILD_TOKEN,
+        deadline=deadline,  # type: ignore[arg-type]
+        max_groups=10,
+    )
+
+    first = loader(context=context, cursor=None, limit=1)
+    second = loader(
+        context=context,
+        cursor=SourceKeysetCursor(context.snapshot_cutoff, "alpha"),
+        limit=10,
+    )
+
+    assert [group.attribute_key for group in first] == ["alpha"]
+    assert first[0].observed_types == ("number", "string")
+    assert first[0].project_ids == (PROJECT_A, PROJECT_B)
+    assert first[0].first_seen == first_seen.replace(tzinfo=UTC)
+    assert [group.attribute_key for group in second] == ["beta"]
+    assert len(client.calls) == 1
+    sql, params, timeout_ms = client.calls[0]
+    assert f"`{CATALOG_DATABASE}`.`span_attribute_value_catalog`" in sql
+    assert "WHERE source_kind = 'custom_attribute'" in sql
+    assert "max_result_bytes = 67108864" in sql
+    assert params == {
+        "organization_id": ORG,
+        "workspace_id": WORKSPACE,
+        "project_ids": (PROJECT_A, PROJECT_B),
+        "catalog_epoch": 11,
+        "catalog_revision": 12,
+        "build_token": BUILD_TOKEN,
+        "catalog_group_limit": 11,
+    }
+    assert timeout_ms == 7_000
+    assert deadline.caps == [CANONICAL_SPAN_QUERY_TIMEOUT_MS]
+
+
+def test_revision_pinned_group_loader_rejects_context_or_cursor_drift() -> None:
+    context = _catalog_group_context()
+    loader = RevisionPinnedSpanAttributeGroupPageLoader(
+        _CatalogGroupClient(()),
+        context=context,
+        build_token=BUILD_TOKEN,
+        deadline=_FixedDeadline(7_000),  # type: ignore[arg-type]
+    )
+    changed = replace(context, catalog_revision=context.catalog_revision + 1)
+
+    with pytest.raises(PropertySourceError, match="context changed"):
+        loader(context=changed, cursor=None, limit=1)
+    with pytest.raises(PropertySourceError, match="outside the revision fence"):
+        loader(
+            context=context,
+            cursor=SourceKeysetCursor(
+                context.snapshot_cutoff - timedelta(microseconds=1), "alpha"
+            ),
+            limit=1,
+        )
+
+
+def test_revision_pinned_group_loader_fails_closed_on_bounds_and_scope() -> None:
+    context = _catalog_group_context()
+    row = {
+        "attribute_key": "alpha",
+        "observed_types": ("string",),
+        "project_ids": ("99999999-9999-4999-8999-999999999999",),
+        "first_seen": datetime(2026, 1, 1, tzinfo=UTC),
+        "last_seen": datetime(2026, 1, 2, tzinfo=UTC),
+    }
+    loader = RevisionPinnedSpanAttributeGroupPageLoader(
+        _CatalogGroupClient((row,)),
+        context=context,
+        build_token=BUILD_TOKEN,
+        deadline=_FixedDeadline(7_000),  # type: ignore[arg-type]
+    )
+    with pytest.raises(PropertySourceError, match="exceed the build scope"):
+        loader(context=context, cursor=None, limit=1)
+
+    over_rows = tuple({**row, "attribute_key": f"key-{index}"} for index in range(3))
+    over = RevisionPinnedSpanAttributeGroupPageLoader(
+        _CatalogGroupClient(over_rows),
+        context=context,
+        build_token=BUILD_TOKEN,
+        deadline=_FixedDeadline(7_000),  # type: ignore[arg-type]
+        max_groups=2,
+    )
+    with pytest.raises(PropertySourceError, match="row bound"):
+        over(context=context, cursor=None, limit=1)
 
 
 def _reader(

@@ -173,6 +173,18 @@ class CanonicalSpanSourceClient(Protocol):
     ) -> Sequence[Mapping[str, Any]]: ...
 
 
+class RevisionPinnedCatalogClient(Protocol):
+    catalog_database: str
+
+    def query(
+        self,
+        sql: str,
+        params: Mapping[str, Any],
+        *,
+        timeout_ms: int,
+    ) -> Sequence[Mapping[str, Any]]: ...
+
+
 class SpanCheckpointStore(Protocol):
     def append(self, value: CheckpointWrite) -> None: ...
 
@@ -983,6 +995,206 @@ class CanonicalSpanAttributeGroupPageLoader:
             )
             for key, (types, projects, first_seen, last_seen) in sorted(groups.items())
         )
+
+
+class RevisionPinnedSpanAttributeGroupPageLoader:
+    """Read complete key/type/project unions from this build's value rows.
+
+    Authoritative value reconciliation has already projected and revision-pinned
+    every selectable span attribute. Definitions therefore consume that exact
+    immutable build output instead of repeating the expensive canonical spans
+    hydration scan. The independent source audit still runs after definition
+    projection and proves that the source did not change before activation.
+    """
+
+    def __init__(
+        self,
+        client: RevisionPinnedCatalogClient,
+        *,
+        context: PostgresSnapshotContext,
+        build_token: str,
+        deadline: SharedCatalogDeadline,
+        timeout_ms: int = CANONICAL_SPAN_QUERY_TIMEOUT_MS,
+        max_groups: int = _MAX_GROUPS,
+        max_group_bytes: int = _MAX_GROUP_BYTES,
+    ) -> None:
+        database = getattr(client, "catalog_database", None)
+        if (
+            not isinstance(database, str)
+            or _SOURCE_DATABASE_RE.fullmatch(database) is None
+        ):
+            raise ValueError("revision-pinned catalog database is invalid")
+        if type(timeout_ms) is not int or not 1 <= timeout_ms <= 30_000:
+            raise ValueError("span group query timeout is outside [1, 30000]")
+        if type(max_groups) is not int or not 1 <= max_groups <= _MAX_GROUPS:
+            raise ValueError("span group ceiling is outside [1, 100000]")
+        if (
+            type(max_group_bytes) is not int
+            or not 1 <= max_group_bytes <= _MAX_GROUP_BYTES
+        ):
+            raise ValueError("span group byte ceiling is outside [1, 64 MiB]")
+        self._client = client
+        self._catalog_database = database
+        self._context = context
+        self._build_token = canonical_uuid(build_token, field="build_token")
+        self._deadline = deadline
+        self._timeout_ms = timeout_ms
+        self._max_groups = max_groups
+        self._max_group_bytes = max_group_bytes
+        self._cache: (
+            tuple[tuple[str, tuple[str, ...], tuple[str, ...], datetime, datetime], ...]
+            | None
+        ) = None
+
+    def __call__(
+        self,
+        *,
+        context: PostgresSnapshotContext,
+        cursor: SourceKeysetCursor | None,
+        limit: int,
+    ) -> Sequence[SpanAttributeKeyGroup]:
+        if context != self._context:
+            raise PropertySourceError("span group context changed after build pinning")
+        if type(limit) is not int or limit < 1:
+            raise PropertySourceError("span group page limit must be positive")
+        if cursor is not None and cursor.updated_at != context.snapshot_cutoff:
+            raise PropertySourceError("span group cursor is outside the revision fence")
+        if self._cache is None:
+            self._cache = self._load_groups()
+        after = cursor.source_entity_id if cursor is not None else ""
+        selected = (item for item in self._cache if item[0] > after)
+        revision_fenced_at = context.snapshot_cutoff.astimezone(UTC)
+        return tuple(
+            SpanAttributeKeyGroup(
+                attribute_key=key,
+                observed_types=types,
+                project_ids=projects,
+                catalog_revision=context.catalog_revision,
+                revision_fenced_at=revision_fenced_at,
+                first_seen=first_seen,
+                last_seen=last_seen,
+            )
+            for key, types, projects, first_seen, last_seen in list(selected)[:limit]
+        )
+
+    def _load_groups(
+        self,
+    ) -> tuple[tuple[str, tuple[str, ...], tuple[str, ...], datetime, datetime], ...]:
+        if getattr(self._client, "catalog_database", None) != self._catalog_database:
+            raise PropertySourceError(
+                "revision-pinned catalog client identity changed during the read"
+            )
+        result_limit = self._max_groups + 1
+        sql = f"""
+SELECT
+    attribute_key,
+    arraySort(groupUniqArray(toString(attribute_type))) AS observed_types,
+    arraySort(groupUniqArray(toString(project_id))) AS project_ids,
+    min(first_seen) AS first_seen,
+    max(last_seen) AS last_seen
+FROM `{self._catalog_database}`.`span_attribute_value_catalog`
+PREWHERE organization_id = %(organization_id)s
+  AND workspace_id = %(workspace_id)s
+  AND project_id IN %(project_ids)s
+  AND catalog_epoch = %(catalog_epoch)s
+  AND catalog_revision = %(catalog_revision)s
+  AND build_token = %(build_token)s
+WHERE source_kind = 'custom_attribute'
+GROUP BY attribute_key
+ORDER BY attribute_key ASC
+LIMIT %(catalog_group_limit)s
+SETTINGS max_threads = 1,
+         max_result_rows = {result_limit},
+         max_result_bytes = {self._max_group_bytes},
+         result_overflow_mode = 'throw'
+"""
+        remaining = self._deadline.remaining_ms(cap_ms=self._timeout_ms)
+        rows = tuple(
+            self._client.query(
+                sql,
+                {
+                    "organization_id": self._context.organization_id,
+                    "workspace_id": self._context.workspace_id,
+                    "project_ids": self._context.project_ids,
+                    "catalog_epoch": self._context.catalog_epoch,
+                    "catalog_revision": self._context.catalog_revision,
+                    "build_token": self._build_token,
+                    "catalog_group_limit": result_limit,
+                },
+                timeout_ms=remaining,
+            )
+        )
+        if len(rows) > self._max_groups:
+            raise PropertySourceError(
+                "revision-pinned span group inventory exceeded its row bound"
+            )
+
+        groups: list[
+            tuple[str, tuple[str, ...], tuple[str, ...], datetime, datetime]
+        ] = []
+        encoded_bytes = 0
+        previous_key = ""
+        expected_fields = {
+            "attribute_key",
+            "observed_types",
+            "project_ids",
+            "first_seen",
+            "last_seen",
+        }
+        allowed_types = {"string", "number", "boolean", "array", "map", "json"}
+        allowed_projects = frozenset(self._context.project_ids)
+        for row in rows:
+            if set(row) != expected_fields:
+                raise PropertySourceError("revision-pinned span group row is malformed")
+            key = row.get("attribute_key")
+            raw_types = row.get("observed_types")
+            raw_projects = row.get("project_ids")
+            if not isinstance(key, str) or not key or key <= previous_key:
+                raise PropertySourceError(
+                    "revision-pinned span groups are not strictly key ordered"
+                )
+            if isinstance(raw_types, (str, bytes)) or not isinstance(
+                raw_types, Sequence
+            ):
+                raise PropertySourceError("span group observed_types is malformed")
+            if isinstance(raw_projects, (str, bytes)) or not isinstance(
+                raw_projects, Sequence
+            ):
+                raise PropertySourceError("span group project_ids is malformed")
+            types = tuple(sorted({str(value) for value in raw_types}))
+            projects = tuple(
+                sorted(
+                    {
+                        canonical_uuid(value, field="span group project_id")
+                        for value in raw_projects
+                    }
+                )
+            )
+            if not types or not set(types) <= allowed_types:
+                raise PropertySourceError("span group observed_types is unsupported")
+            if not projects or not set(projects) <= allowed_projects:
+                raise PropertySourceError("span group projects exceed the build scope")
+            first_seen = _clickhouse_utc_datetime(
+                row.get("first_seen"), "span group first_seen"
+            )
+            last_seen = _clickhouse_utc_datetime(
+                row.get("last_seen"), "span group last_seen"
+            )
+            if first_seen > last_seen:
+                raise PropertySourceError("span group first_seen follows last_seen")
+            encoded_bytes += (
+                len(key.encode("utf-8"))
+                + sum(len(value.encode("utf-8")) for value in types)
+                + sum(len(value.encode("utf-8")) for value in projects)
+                + 128
+            )
+            if encoded_bytes > self._max_group_bytes:
+                raise PropertySourceError(
+                    "revision-pinned span group inventory exceeded its byte bound"
+                )
+            groups.append((key, types, projects, first_seen, last_seen))
+            previous_key = key
+        return tuple(groups)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1931,6 +2143,12 @@ def _clickhouse_utc_hour(value: Any) -> datetime:
     return hour
 
 
+def _clickhouse_utc_datetime(value: Any, field: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise PropertySourceError(f"{field} must be a ClickHouse datetime")
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 def _unit_may_be_occupied(
     occupied_hours: frozenset[tuple[str, datetime]],
     *,
@@ -1981,6 +2199,8 @@ __all__ = [
     "DEV_INITIAL_BACKFILL_CANONICAL_SPAN_QUERY_TIMEOUT_MS",
     "FrozenSpanSource",
     "PropertyCatalogSpanSourceError",
+    "RevisionPinnedCatalogClient",
+    "RevisionPinnedSpanAttributeGroupPageLoader",
     "MAX_CANONICAL_SPAN_PAGE_ROWS",
     "SPAN_AUDIT_CUTOFF_LABEL",
     "SpanScanCursor",

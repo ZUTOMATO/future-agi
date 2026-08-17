@@ -122,9 +122,9 @@ from .span_source import (
     AuthoritativeSpanReconciler,
     AuthoritativeSpanResult,
     AuthoritativeSpanRole,
-    CanonicalSpanAttributeGroupPageLoader,
     CanonicalSpanSourceReader,
     FrozenSpanSource,
+    RevisionPinnedSpanAttributeGroupPageLoader,
     stream_requirement,
 )
 from .state_store import (
@@ -2408,9 +2408,11 @@ class CheckedInPropertyCatalogDevRuntime:
         span = self._run_definition_adapter(
             execution,
             SpanAttributeDefinitionSourceAdapter(
-                group_page_loader=CanonicalSpanAttributeGroupPageLoader(
-                    self.span_reader,
-                    execution.frozen,
+                group_page_loader=RevisionPinnedSpanAttributeGroupPageLoader(
+                    self.catalog_client,
+                    context=execution.context,
+                    build_token=execution.lease.build_token,
+                    deadline=self.deadline,
                 )
             ),
         )
