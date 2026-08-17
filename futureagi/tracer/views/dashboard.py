@@ -2989,6 +2989,17 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                 ReadDeadlineExceeded,
             ) as exc:
                 if not isinstance(exc, ValueError):
+                    logger.warning(
+                        "property_catalog_scope_unavailable",
+                        family=getattr(exc, "family", "scope"),
+                        error_type=type(exc).__name__,
+                        cause_type=(
+                            type(exc.__cause__).__name__
+                            if exc.__cause__ is not None
+                            else None
+                        ),
+                        workspace_id=str(workspace.id),
+                    )
                     return self._gm.custom_error_response(
                         status.HTTP_503_SERVICE_UNAVAILABLE,
                         "Dashboard properties are temporarily unavailable. Please retry.",
