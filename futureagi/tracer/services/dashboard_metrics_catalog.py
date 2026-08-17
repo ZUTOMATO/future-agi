@@ -499,7 +499,7 @@ def _resolve_metrics_catalog_project_scope(
                 "project_scope",
                 lambda: [
                     str(project_id)
-                    for project_id in Project.objects.filter(
+                    for project_id in Project.no_workspace_objects.filter(
                         workspace=workspace,
                         id__in=requested_project_ids,
                     )
@@ -524,7 +524,9 @@ def _resolve_metrics_catalog_project_scope(
                 "project_scope",
                 lambda: [
                     str(project_id)
-                    for project_id in Project.objects.filter(workspace=workspace)
+                    for project_id in Project.no_workspace_objects.filter(
+                        workspace=workspace
+                    )
                     .order_by("id")
                     .values_list("id", flat=True)
                 ],
