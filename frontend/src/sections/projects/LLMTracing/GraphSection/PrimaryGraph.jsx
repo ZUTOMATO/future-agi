@@ -612,6 +612,9 @@ const PrimaryGraph = ({
         pollingRef.current = false;
         return false;
       }
+      // React Query recalculates intervals when a poll starts. Do not spend the
+      // next delay budget until the in-flight response records its outcome.
+      if (query.state.fetchStatus === "fetching") return false;
       pollingControllerRef.current.start();
       const delay = pollingControllerRef.current.nextDelay();
       if (delay === false) {
