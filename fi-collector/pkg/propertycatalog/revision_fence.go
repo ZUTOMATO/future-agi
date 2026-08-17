@@ -18,6 +18,7 @@ const (
 	maxRevisionFenceBytes   = 1 << 20
 	maxRevisionFenceEntries = 256
 	maxRevisionProjects     = 256
+	maxRevisionLease        = 30 * time.Minute
 )
 
 // RevisionFence is an activation-control-plane-owned build assignment. The
@@ -223,7 +224,7 @@ func validateRevisionFence(fence RevisionFence, now time.Time) error {
 		drainDeadline, err := time.Parse(dateTime64Layout, fence.DrainDeadline)
 		if err != nil || drainDeadline.Format(dateTime64Layout) != fence.DrainDeadline ||
 			!drainDeadline.After(now) || !drainDeadline.After(issuedAt) ||
-			drainDeadline.Sub(issuedAt) > 10*time.Minute {
+			drainDeadline.Sub(issuedAt) > maxRevisionLease {
 			return errors.New("draining fence deadline is invalid, expired, or too wide")
 		}
 	case "fenced":

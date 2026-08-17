@@ -140,6 +140,41 @@ func TestFileRevisionProviderValidatesDrainingBoundaryAndDeadline(t *testing.T) 
 	}
 }
 
+func TestFileRevisionProviderAcceptsExtendedInitialBuildLease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fence.json")
+	draining := testRevisionFence(17, "draining")
+	draining.IssuedAt = "2026-08-14 11:30:00.000000"
+	draining.ExpiresAt = "2026-08-14 12:00:00.000000"
+	draining.DrainDeadline = draining.ExpiresAt
+	draining.FencedSequence = 3
+	raw, err := EncodeRevisionFenceFile([]RevisionFence{draining})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider, _ := NewFileRevisionProvider(path)
+	provider.now = func() time.Time {
+		value, _ := time.Parse(dateTime64Layout, "2026-08-14 11:59:00.000000")
+		return value
+	}
+	if _, err := provider.CurrentRevision(context.Background(), testOrganization, testWorkspace); err != nil {
+		t.Fatalf("30-minute Python lease was rejected: %v", err)
+	}
+
+	draining.ExpiresAt = "2026-08-14 12:00:00.000001"
+	draining.DrainDeadline = draining.ExpiresAt
+	raw, _ = EncodeRevisionFenceFile([]RevisionFence{draining})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.CurrentRevision(context.Background(), testOrganization, testWorkspace); err == nil ||
+		!strings.Contains(err.Error(), "too wide") {
+		t.Fatalf("overwide drain error=%v", err)
+	}
+}
+
 func TestFileRevisionProviderRejectsExpiredTamperedAndWritableFence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fence.json")
 	raw, _ := EncodeRevisionFenceFile([]RevisionFence{testRevisionFence(17, "building")})
