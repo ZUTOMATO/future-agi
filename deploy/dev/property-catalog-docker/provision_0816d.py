@@ -21,6 +21,39 @@ if re.fullmatch(r"[0-9]{4}[a-z]", SUFFIX) is None:
 CATALOG_EPOCH = int(os.environ.get("TH7247_CATALOG_EPOCH", "2"))
 if not 1 <= CATALOG_EPOCH <= 65535:
     raise RuntimeError("TH7247_CATALOG_EPOCH must be between 1 and 65535")
+ORGANIZATION_ID = os.environ.get(
+    "TH7247_ORGANIZATION_ID", "36ab6a86-28ef-484e-9fa2-0aade2cde52d"
+)
+WORKSPACE_ID = os.environ.get(
+    "TH7247_WORKSPACE_ID", "f7f5533e-44a1-438b-9e6d-6f4747f1eb16"
+)
+PROJECT_IDS = tuple(
+    value.strip()
+    for value in os.environ.get(
+        "TH7247_PROJECT_IDS",
+        "5272afb0-4b6e-4cc5-8415-d41b297f6a20,"
+        "d9d8498f-abab-42e0-9794-bb75a7f27350",
+    ).split(",")
+    if value.strip()
+)
+SPAN_SINCE = os.environ.get("TH7247_SPAN_SINCE", "2025-08-16T07:00:00Z")
+SPAN_UNTIL = os.environ.get("TH7247_SPAN_UNTIL", "2026-08-16T07:00:00Z")
+for field_name, value in (
+    ("TH7247_ORGANIZATION_ID", ORGANIZATION_ID),
+    ("TH7247_WORKSPACE_ID", WORKSPACE_ID),
+):
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{field_name} must be a UUIDv4") from exc
+    if parsed.version != 4 or str(parsed) != value:
+        raise RuntimeError(f"{field_name} must be a canonical UUIDv4")
+if not 1 <= len(PROJECT_IDS) <= 256 or PROJECT_IDS != tuple(sorted(set(PROJECT_IDS))):
+    raise RuntimeError("TH7247_PROJECT_IDS must contain 1..256 sorted unique UUIDv4s")
+for project_id in PROJECT_IDS:
+    parsed = uuid.UUID(project_id)
+    if parsed.version != 4 or str(parsed) != project_id:
+        raise RuntimeError("TH7247_PROJECT_IDS must contain canonical UUIDv4s")
 ROOT = Path(f"/home/ubuntu/th7247-kartik-{SUFFIX}")
 PRIVATE = ROOT / "private"
 RUNTIME = ROOT / "runtime"
@@ -386,6 +419,7 @@ COMMIT;
     )
 
     stream_id = str(uuid.uuid4())
+    project_yaml = "\n".join(f"    - {project_id}" for project_id in PROJECT_IDS)
     config = f"""format: futureagi.property-catalog-dev-docker
 version: 1
 deployment_id: kartik-{SUFFIX}
@@ -395,19 +429,18 @@ images:
 host:
   root: {ROOT}
 workspace:
-  organization_id: 36ab6a86-28ef-484e-9fa2-0aade2cde52d
-  workspace_id: f7f5533e-44a1-438b-9e6d-6f4747f1eb16
+  organization_id: {ORGANIZATION_ID}
+  workspace_id: {WORKSPACE_ID}
   project_ids:
-    - 5272afb0-4b6e-4cc5-8415-d41b297f6a20
-    - d9d8498f-abab-42e0-9794-bb75a7f27350
+{project_yaml}
 catalog:
   epoch: {CATALOG_EPOCH}
   projection_version: 1
   hot_producer_stream_id: {stream_id}
   source_database: futureagi
   target_database: {TARGET}
-  span_since: "2025-08-16T07:00:00Z"
-  span_until: "2026-08-16T07:00:00Z"
+  span_since: "{SPAN_SINCE}"
+  span_until: "{SPAN_UNTIL}"
   dev_identity: dev:property-catalog/kartik-{SUFFIX}
 infrastructure:
   application_docker_network: futureagi_default
