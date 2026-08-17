@@ -364,6 +364,47 @@ describe("usePropertyCatalog", () => {
     expect(result.current.cursorChainStopped).toBe(false);
   });
 
+  it("drops retained continuation pages when a picker is disabled", async () => {
+    mocks.get
+      .mockResolvedValueOnce({
+        data: { result: page({ has_more: true, next_cursor: "cursor-2" }) },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          result: page({
+            metrics: [
+              {
+                name: "customer.tier",
+                property_id: "custom_attribute:customer.tier",
+                property_kind: "custom_attribute",
+                category: "custom_attribute",
+              },
+            ],
+          }),
+        },
+      });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { result, rerender } = renderHook(
+      ({ enabled }) => usePropertyCatalog({ enabled }),
+      {
+        initialProps: { enabled: true },
+        wrapper: createQueryWrapper(queryClient),
+      },
+    );
+
+    await waitFor(() => expect(result.current.hasNextPage).toBe(true));
+    await act(() => result.current.fetchNextPage());
+    await waitFor(() => expect(result.current.metrics).toHaveLength(2));
+
+    rerender({ enabled: false });
+
+    await waitFor(() => expect(result.current.metrics).toHaveLength(1));
+    expect(result.current.data.pages).toHaveLength(1);
+    expect(result.current.data.pageParams).toEqual([null]);
+  });
+
   it("stops a malformed or repeated continuation", () => {
     const malformed = validatePropertyCatalogPage(
       page({ has_more: true, next_cursor: "cursor-repeat" }),
