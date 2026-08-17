@@ -1095,12 +1095,26 @@ export function buildTraceFilterProperties(
         !sources.includes("traces");
       const isSimulationMetric =
         src === "simulation" || sources.includes("simulation");
+      const sourceTokens = new Set([src, ...sources].filter(Boolean));
+      const sourceCompatible =
+        !sourceScope ||
+        sourceTokens.has("all") ||
+        sourceTokens.has("both") ||
+        sourceTokens.has(sourceScope) ||
+        (sourceScope === "spans" && sourceTokens.has("traces"));
 
       // Always exclude blacklisted metrics
       if (EXCLUDED_METRICS.has(name)) return false;
 
       // Exclude dataset-only metrics
       if (src === "datasets") return false;
+
+      // A catalog page can be reused by older/fallback consumers, so retain a
+      // defensive source check in addition to the server-side source filter.
+      // In particular, simulator projects also have trace pages: simulation
+      // definitions must never be offered there and then submitted through
+      // source=traces, which the API correctly rejects as an invalid binding.
+      if (!sourceCompatible) return false;
 
       if (sourceScope === "simulation" && !isSimulationMetric) return false;
 
@@ -1191,11 +1205,13 @@ export function useTraceFilterProperties(
   const fallbackScopeKey = JSON.stringify([
     "trace-filter-property-catalog",
     projectId || "",
+    sourceScope || "",
   ]);
   const catalog = usePropertyCatalog({
     projectIds: projectId ? [projectId] : [],
+    source: sourceScope || "",
     perEvalConfig: true,
-    pageSize: 200,
+    pageSize: 20,
     enabled: enabled && Boolean(projectId),
     allowLegacyNotReadyFallback: true,
     fallbackScopeKey,

@@ -256,7 +256,20 @@ def _read_property_catalog_value_page(request, query_params, *, deadline):
                 "window_end": window_end,
             }
         )
-    page = reader.read_page(**read_args)
+    try:
+        page = reader.read_page(**read_args)
+    except PropertyCatalogValueCursorError as exc:
+        # A system definition can deliberately retain its established native
+        # value adapter.  Its first cursor page is then emitted by the native
+        # reader below, but the next request still reaches this additive
+        # catalog probe first.  The two cursor families use different signing
+        # salts, so an otherwise valid native cursor is ``invalid_cursor`` to
+        # the catalog decoder.  Preserve real catalog scope/query mismatches,
+        # while allowing only a foreign cursor family to reach the native
+        # decoder that owns it.
+        if query_params.get("cursor") and exc.code == "invalid_cursor":
+            raise PropertyCatalogValueNotReady("native_cursor_adapter") from exc
+        raise
     deadline.remaining_ms(floor_ms=1)
     return page
 

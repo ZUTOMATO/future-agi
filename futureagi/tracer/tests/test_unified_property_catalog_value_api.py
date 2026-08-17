@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
 from rest_framework.response import Response
 
 from tracer.services.clickhouse.v2.property_catalog.value_cursor import (
@@ -15,7 +16,10 @@ from tracer.services.clickhouse.v2.property_catalog.value_reader import (
     PropertyCatalogValueNotReady,
     PropertyCatalogValueUnavailable,
 )
-from tracer.views.dashboard import DashboardViewSet
+from tracer.views.dashboard import (
+    DashboardViewSet,
+    _read_property_catalog_value_page,
+)
 
 ORG_ID = "11111111-1111-1111-1111-111111111111"
 WORKSPACE_ID = "22222222-2222-2222-2222-222222222222"
@@ -217,6 +221,41 @@ def test_filter_values_catalog_cursor_error_is_sanitized_400(settings):
 
     assert response.status_code == 400
     assert response.data["code"] == "cursor_mismatch"
+
+
+def test_native_value_cursor_bypasses_additive_catalog_decoder(settings):
+    _enable(settings)
+    reader = Mock()
+    reader.read_page.side_effect = PropertyCatalogValueCursorError(
+        "invalid_cursor",
+        "The property-value continuation cursor is invalid.",
+    )
+    request = _request(
+        property_id="system_attribute:traces:provider",
+        _property_kind="system_attribute",
+        metric_name="provider",
+        metric_type="system_metric",
+        search="",
+        cursor="native-signed-cursor",
+    )
+    deadline = Mock()
+    deadline.remaining_ms.return_value = 1_000
+
+    with (
+        patch(
+            "tracer.views.dashboard.resolve_property_catalog_project_scope",
+            return_value=[PROJECT_ID],
+        ),
+        patch("tracer.views.dashboard.PropertyCatalogReadExecutor"),
+        patch("tracer.views.dashboard.PropertyCatalogValueReader", return_value=reader),
+        pytest.raises(PropertyCatalogValueNotReady) as raised,
+    ):
+        _read_property_catalog_value_page(
+            request,
+            request.validated_query_data,
+            deadline=deadline,
+        )
+    assert raised.value.reason == "native_cursor_adapter"
 
 
 def test_only_typed_not_ready_signal_enters_existing_native_adapter(settings):

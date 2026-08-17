@@ -1610,6 +1610,32 @@ describe("voice-call property parity", () => {
 });
 
 describe("exact manual attribute fallback", () => {
+  it("requests the unified trace catalog as a source-scoped page of 20", () => {
+    propertyCatalogMock.mockReturnValue({
+      legacyFallbackRequired: false,
+      metrics: [],
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      hasNextPage: false,
+    });
+
+    const { anchorEl } = renderPanel({
+      projectId: "project-source-scope",
+      source: "traces",
+    });
+
+    expect(propertyCatalogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectIds: ["project-source-scope"],
+        source: "traces",
+        pageSize: 20,
+        perEvalConfig: true,
+      }),
+    );
+    document.body.removeChild(anchorEl);
+  });
+
   it("keeps property selection usable and prefetches retained keys while the catalog is pending", async () => {
     let resolveCatalog;
     const pendingCatalog = new Promise((resolve) => {
@@ -4478,6 +4504,39 @@ describe("annotator annotation filter (TH-4710)", () => {
         }),
       ]),
     );
+  });
+
+  it("does not expose simulation properties on a trace-source picker", () => {
+    const metrics = [
+      {
+        name: "agent_definition",
+        display_name: "Agent",
+        category: "system_metric",
+        source: "simulation",
+        sources: ["simulation"],
+        type: "string",
+      },
+      {
+        name: "model",
+        display_name: "Model",
+        category: "system_metric",
+        source: "traces",
+        sources: ["traces"],
+        type: "string",
+      },
+    ];
+
+    expect(
+      buildTraceFilterProperties(metrics, {
+        isSimulator: true,
+        sourceScope: "traces",
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: "model",
+        registryId: "system_attribute:traces:model",
+      }),
+    ]);
   });
 
   it("adds a global Annotator property inside annotation filters", () => {
