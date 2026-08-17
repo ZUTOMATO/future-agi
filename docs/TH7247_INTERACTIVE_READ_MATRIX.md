@@ -12,9 +12,12 @@
 > unique semantic value states after 35,586 source rows emitted 941,080 Kafka
 > value rows. All expected stream fences are complete with zero gaps, poison, or
 > conflicts. Source reads remained SELECT-only and no existing application
-> table/data was changed. No production deployment or local customer-data copy
-> is part of this freeze. The formal Whatfix dense, Colektia sparse, and Mudflap
-> voice matrix remains unrun, so the DEV smoke is not a production sign-off. See
+> table/data was changed. No production deployment, backfill, DDL/DML, or local
+> customer-data copy is part of this freeze. A supplementary current-source,
+> server-read-only query-builder matrix now covers Whatfix dense and Colektia
+> sparse trace/span/session reads, but the formal authenticated HTTP matrix and
+> Mudflap voice matrix remain unrun, so the DEV smoke is not a production
+> sign-off. See
 > [`TH-7247_PROPERTY_API_MATRIX.md`](TH-7247_PROPERTY_API_MATRIX.md) for the
 > smaller SELECT-only release gate and its pending production targets. No
 > Kartik account data has been copied into a local fixture, so no account-specific
@@ -505,15 +508,46 @@ not a current DEV route-matrix or customer-population result.
 
 The historical evidence below predates the current nine-interval qualifier and
 covers only the old W1-W6 grid. It has no historical result for W0 (1 hour), 30
-minutes, or 6 hours. Current-source qualification was authorized and attempted,
-but no route matrix completed: the US source-bound result failed named-target
+minutes, or 6 hours. Current-source HTTP qualification was authorized and
+attempted, but no authenticated route matrix completed: the US source-bound result failed named-target
 rediscovery before any API request, the EU attempt was halted before
 current-source request lanes after the old deployed image ran its legacy
 startup DDL cycle, and the later isolated DEV attempt failed canonical
 PostgreSQL tenant ownership before qualifier API callbacks. Those partial runs
 are discarded as qualification evidence. The fresh isolated `0816d` plan is
 pending read-only remote-state inspection, so all nine current-source intervals
-remain pending rather than inheriting historical results.
+remain pending for the authenticated public-route gate rather than inheriting
+historical results.
+
+### Current-source production SELECT matrix (supplementary, not HTTP sign-off)
+
+At review head `2049c9dddd170e93d0eba5411f74fce71512fc7d`, the isolated
+GCP qualifier pod attested ClickHouse `readonly=1`, accepted only top-level
+`SELECT`/`WITH ... SELECT`, had no service-account token or PostgreSQL
+credentials, and ran the current trace/span/session cursor routing against
+frozen end time `2026-08-17T07:00:00Z`. It exercised both named populations,
+all nine windows (`30m` through `365d`), and default, custom, system, and
+combined filter profiles. The resulting 263 recorded lane executions (216
+primary lanes plus eligible repeat/continuation lanes) had zero failures, zero
+calls at or above ten seconds, zero cursor overlaps, and zero unstable repeats;
+the slowest lane was 2,183.66 ms. The sanitized result JSON SHA-256 is
+`22bb0f2a98c9e234385e9f83a7fac1ab63b529a665bbbd604c9a2372ce6ed59f`.
+
+An initial harness draft incorrectly sent default session cursor lanes through
+the legacy numbered candidate-first query. That produced five apparent
+Colektia failures. After the harness mirrored `TraceSessionView` exactly—using
+the rollup-backed bounded selector for default cursor mode—the focused
+30d/90d/180d/365d rerun passed all six page/repeat/continuation checks with a
+1,608.74 ms maximum, and the full matrix above passed. This was a qualifier
+routing defect, not a production cursor-query defect. The executable evidence
+is [query_builder_matrix.py](../futureagi/scripts/th7247_current_select_qualifier/query_builder_matrix.py).
+
+This result is strong current-source ClickHouse/query-builder latency and
+continuation evidence, but it is deliberately not public API proof: the
+historical target projects no longer have the PostgreSQL authorization rows
+required to authenticate the formal HTTP callbacks. Mudflap voice,
+eval/annotation-positive population, F7 conjunctions, and the full graph/API
+matrix therefore remain release gates.
 
 Population coverage is also pending. The required dense profile is Whatfix;
 historical Colektia calls labelled “dense” and “sparse” selected different

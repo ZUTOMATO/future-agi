@@ -19,9 +19,11 @@ production gate, is maintained in
 > reservation are fenced, with zero delivery gaps, poison rows, or conflicts.
 > DEV backend readers are enabled only for the reviewed workspace. Source
 > ClickHouse/PostgreSQL access remained SELECT-only and no existing application
-> table or data was changed. Production remains untouched and unauthorized. This
-> is Kartik-account DEV functional evidence, not the still-pending formal dense
-> Whatfix, sparse Colektia, and Mudflap voice release matrix.
+> table or data was changed. No production deployment, backfill, DDL, or DML
+> occurred. An isolated server-read-only production SELECT matrix was
+> authorized and is summarized below; it is query-builder evidence, not the
+> still-pending authenticated dense Whatfix, sparse Colektia, and Mudflap voice
+> HTTP release matrix.
 
 ## Logical property model
 
@@ -167,10 +169,30 @@ dashboard/widget selectors, dataset selection, and both simulation selectors.
 For project `2843b914-d1f7-4ea0-869d-77fa93ce45dc`, custom key
 `ai_interruption_rate` and the three project-owned annotation labels were
 present while unrelated project-only properties were absent. The frontend
-picker regression suite passes 135 tests. The source-bound dense/sparse/voice
-nine-window matrix, named population evidence, and all production catalog work
-remain pending. Production requires a complete exact-current-source matrix and
-separate user approval.
+picker regression suite passes 135 tests. On deployed review head
+`2049c9dddd`, the Dashboard All picker additionally exposes one unified
+pagination action: one click advanced both internal streams, grew the visible
+inventory from 46 to 80 entries, and remained stable without replay; the Trace
+Attributes category grew from 30 to 51 entries through the same single action.
+The focused regression suite is 19/19. The authenticated source-bound
+dense/sparse/voice nine-window HTTP matrix, full named-population evidence, and
+all production catalog deployment/backfill work remain pending. Production
+changes require a complete exact-current-source API gate and separate user
+approval.
+
+The supplementary current-source production SELECT matrix ran the exact
+trace/span/session cursor routing for Whatfix dense and Colektia sparse across
+all nine windows and default/custom/system/combined profiles. Its 263 recorded
+primary/repeat/continuation lanes had zero failures, zero calls at or above ten
+seconds, zero cursor overlaps, and zero unstable repeats; the slowest lane was
+2,183.66 ms. The execution used a server-enforced read-only ClickHouse role,
+accepted only `SELECT`/`WITH ... SELECT`, had no service-account token or
+PostgreSQL credentials, and issued no DDL/DML. Because the historical projects
+lack current PostgreSQL authorization rows, this is reproducible
+query-builder/SELECT evidence rather than authenticated public-API proof. See
+[query_builder_matrix.py](../futureagi/scripts/th7247_current_select_qualifier/query_builder_matrix.py)
+and the detailed evidence boundary in
+[`TH7247_INTERACTIVE_READ_MATRIX.md`](TH7247_INTERACTIVE_READ_MATRIX.md#current-source-production-select-matrix-supplementary-not-http-sign-off).
 
 DEV graph/dashboard preparation had a separate deployment-skew failure: the
 backend scheduled `tracer.refresh_exact_aggregation_snapshot` to `tasks_xl`,
