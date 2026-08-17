@@ -1868,6 +1868,7 @@ export default function WidgetEditorView() {
   const [rightTab, setRightTab] = useState(0);
   // Shared picker state: used for metric, filter, and breakdown pickers
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerCatalogSession, setPickerCatalogSession] = useState(0);
   const [pickerAnchor, setPickerAnchor] = useState(null);
   const [pickerCategory, setPickerCategory] = useState("all");
   const [pickerSearch, setPickerSearch] = useState("");
@@ -1998,6 +1999,7 @@ export default function WidgetEditorView() {
     preservedKeys: preservedDashboardAttributeKeys,
     enabled: cursorAttributePickerActive,
     pageSize: 50,
+    cacheScopeKey: `widget-picker:${pickerCatalogSession}`,
   });
 
   const widgetCatalogRequest = useMemo(
@@ -2017,6 +2019,7 @@ export default function WidgetEditorView() {
     enabled: widgetCatalogRequest.enabled,
     allowLegacyNotReadyFallback: true,
     fallbackScopeKey: `widget-property-catalog:${currentWorkspaceId || ""}`,
+    cacheScopeKey: `widget-picker:${pickerCatalogSession}`,
   });
   const legacyMetricCatalog = useLegacyDashboardMetricsPaginated({
     ...widgetCatalogRequest,
@@ -2636,6 +2639,7 @@ export default function WidgetEditorView() {
   ]);
 
   const openPicker = (e, mode, targetIndex = null, metricIndex = null) => {
+    setPickerCatalogSession((session) => session + 1);
     setPickerAnchor(e.currentTarget);
     setPickerOpen(true);
     setPickerCategory("all");

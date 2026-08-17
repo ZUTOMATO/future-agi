@@ -4,7 +4,7 @@ import {
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios, { endpoints } from "src/utils/axios";
 import { getFilterValueReadState } from "src/utils/queryReadState";
 import { accumulateUniqueListContinuations } from "src/sections/projects/LLMTracing/listCursorPagination";
@@ -37,6 +37,7 @@ const DASHBOARD_KEYS = {
     agentDefinitionId,
     perEvalConfig,
     pageSize,
+    cacheScopeKey,
   ) => [
     ...DASHBOARD_KEYS.all,
     "property-catalog",
@@ -47,6 +48,7 @@ const DASHBOARD_KEYS = {
     agentDefinitionId || "",
     Boolean(perEvalConfig),
     pageSize,
+    cacheScopeKey || "",
   ],
 };
 
@@ -76,17 +78,6 @@ const canonicalizePropertyDefinition = (value) => {
 
 const serializedPropertyDefinition = (metric) =>
   JSON.stringify(canonicalizePropertyDefinition(metric));
-
-const retainFirstPropertyCatalogPage = (data) => {
-  if (!Array.isArray(data?.pages) || data.pages.length <= 1) return data;
-  return {
-    ...data,
-    pages: data.pages.slice(0, 1),
-    pageParams: Array.isArray(data.pageParams)
-      ? data.pageParams.slice(0, 1)
-      : data.pageParams,
-  };
-};
 
 const samePropertyCatalogActivation = (page, baseline) =>
   page?.catalog_epoch === baseline?.catalog_epoch &&
@@ -404,45 +395,28 @@ export function usePropertyCatalog({
   enabled = true,
   allowLegacyNotReadyFallback = false,
   fallbackScopeKey = "",
+  cacheScopeKey = "",
 } = {}) {
-  const canonicalProjectIdsFingerprint = JSON.stringify(
-    [...new Set((projectIds || []).map(String))].sort(),
-  );
-  const canonicalProjectIds = useMemo(
-    () => JSON.parse(canonicalProjectIdsFingerprint),
-    [canonicalProjectIdsFingerprint],
-  );
-  const queryClient = useQueryClient();
+  const canonicalProjectIds = [
+    ...new Set((projectIds || []).map(String)),
+  ].sort();
   const [legacyFallbackScopeKey, setLegacyFallbackScopeKey] = useState(null);
   const legacyFallbackRequired = Boolean(
     allowLegacyNotReadyFallback &&
       fallbackScopeKey &&
       legacyFallbackScopeKey === fallbackScopeKey,
   );
-  const queryKey = useMemo(
-    () =>
-      DASHBOARD_KEYS.propertyCatalog(
-        category,
-        search,
-        source,
-        canonicalProjectIds,
-        agentDefinitionId,
-        perEvalConfig,
-        pageSize,
-      ),
-    [
-      agentDefinitionId,
-      canonicalProjectIds,
+  const query = useInfiniteQuery({
+    queryKey: DASHBOARD_KEYS.propertyCatalog(
       category,
-      pageSize,
-      perEvalConfig,
       search,
       source,
-    ],
-  );
-  const catalogQueryEnabled = enabled && !legacyFallbackRequired;
-  const query = useInfiniteQuery({
-    queryKey,
+      canonicalProjectIds,
+      agentDefinitionId,
+      perEvalConfig,
+      pageSize,
+      cacheScopeKey,
+    ),
     queryFn: ({ pageParam, signal }) =>
       axios
         .get(endpoints.dashboard.metrics, {
@@ -482,23 +456,13 @@ export function usePropertyCatalog({
         ? undefined
         : checked.next_cursor;
     },
-    enabled: catalogQueryEnabled,
+    enabled: enabled && !legacyFallbackRequired,
     retry: false,
     staleTime: 60_000,
     gcTime: 5 * 60_000,
     refetchOnWindowFocus: false,
     meta: { errorHandled: true },
   });
-
-  useEffect(() => {
-    const retainFirstPage = () =>
-      queryClient.setQueryData(queryKey, retainFirstPropertyCatalogPage);
-
-    if (!catalogQueryEnabled) retainFirstPage();
-    return () => {
-      if (catalogQueryEnabled) retainFirstPage();
-    };
-  }, [catalogQueryEnabled, queryClient, queryKey]);
 
   useEffect(() => {
     if (

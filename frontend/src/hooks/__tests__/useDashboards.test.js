@@ -364,7 +364,7 @@ describe("usePropertyCatalog", () => {
     expect(result.current.cursorChainStopped).toBe(false);
   });
 
-  it("drops retained continuation pages when a picker is disabled", async () => {
+  it("starts a fresh first page when a picker cache scope changes", async () => {
     mocks.get
       .mockResolvedValueOnce({
         data: { result: page({ has_more: true, next_cursor: "cursor-2" }) },
@@ -382,14 +382,15 @@ describe("usePropertyCatalog", () => {
             ],
           }),
         },
-      });
+      })
+      .mockResolvedValueOnce({ data: { result: page() } });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
     const { result, rerender } = renderHook(
-      ({ enabled }) => usePropertyCatalog({ enabled }),
+      ({ cacheScopeKey }) => usePropertyCatalog({ cacheScopeKey }),
       {
-        initialProps: { enabled: true },
+        initialProps: { cacheScopeKey: "picker-1" },
         wrapper: createQueryWrapper(queryClient),
       },
     );
@@ -398,11 +399,13 @@ describe("usePropertyCatalog", () => {
     await act(() => result.current.fetchNextPage());
     await waitFor(() => expect(result.current.metrics).toHaveLength(2));
 
-    rerender({ enabled: false });
+    rerender({ cacheScopeKey: "picker-2" });
 
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(result.current.metrics).toHaveLength(1));
     expect(result.current.data.pages).toHaveLength(1);
     expect(result.current.data.pageParams).toEqual([null]);
+    expect(mocks.get.mock.calls[2][1].params).not.toHaveProperty("cursor");
   });
 
   it("stops a malformed or repeated continuation", () => {

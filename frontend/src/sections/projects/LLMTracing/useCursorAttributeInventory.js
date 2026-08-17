@@ -714,6 +714,7 @@ export function useCursorAttributeInventory({
   preservedKeys = EMPTY_KEYS,
   enabled = true,
   pageSize = 50,
+  cacheScopeKey = "",
 }) {
   const workspaceScoped = workspaceScope === true;
   const scopeIdentity = workspaceScoped
@@ -739,6 +740,7 @@ export function useCursorAttributeInventory({
     enabled: enabled && scopeReady,
     allowLegacyNotReadyFallback: true,
     fallbackScopeKey,
+    cacheScopeKey,
   });
   const useLegacyFallback = catalog.legacyFallbackRequired;
   const legacy = useLegacyCursorAttributeInventory({
