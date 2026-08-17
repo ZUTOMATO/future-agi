@@ -2966,6 +2966,25 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
 
         if query_params.get("cursor_mode", False):
             if not _property_catalog_read_enabled_for_workspace(workspace):
+                workspace_id = getattr(workspace, "id", None)
+                logger.warning(
+                    "property_catalog_gate_closed",
+                    configured_mode=getattr(
+                        settings, "PROPERTY_CATALOG_READ_MODE", "off"
+                    ),
+                    workspace_id=str(workspace_id) if workspace_id else None,
+                    workspace_allowlisted=(
+                        workspace_id is not None
+                        and str(workspace_id)
+                        in set(
+                            getattr(
+                                settings,
+                                "PROPERTY_CATALOG_DEV_WORKSPACE_ALLOWLIST",
+                                (),
+                            )
+                        )
+                    ),
+                )
                 return self._gm.custom_error_response(
                     status.HTTP_503_SERVICE_UNAVAILABLE,
                     "The unified property catalog is not ready for this workspace.",
