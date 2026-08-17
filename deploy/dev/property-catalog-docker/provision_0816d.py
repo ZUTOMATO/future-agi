@@ -71,7 +71,12 @@ OP_RUNTIME_IMAGE = os.environ.get(
 )
 if re.fullmatch(r"th7247-current-select:[0-9a-z-]+", OP_RUNTIME_IMAGE) is None:
     raise RuntimeError("TH7247_OPERATOR_RUNTIME_IMAGE must be a TH-7247 DEV tag")
-GO_IMAGE = "sha256:84c45a5c36b71430e1cc5845ab8ce4f0da84332eb97dc8903bfd9c33bd2be1c1"
+GO_IMAGE = os.environ.get(
+    "TH7247_GO_IMAGE",
+    "sha256:84c45a5c36b71430e1cc5845ab8ce4f0da84332eb97dc8903bfd9c33bd2be1c1",
+)
+if re.fullmatch(r"sha256:[0-9a-f]{64}", GO_IMAGE) is None:
+    raise RuntimeError("TH7247_GO_IMAGE must be an exact image ID")
 SOURCE_USER = f"th7247_catalog_source_ro_{SUFFIX}"
 CONTROL_USER = f"th7247_catalog_control_rw_{SUFFIX}"
 CONSUMER_USER = f"th7247_catalog_consumer_rw_{SUFFIX}"
