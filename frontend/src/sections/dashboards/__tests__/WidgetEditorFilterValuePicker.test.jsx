@@ -57,18 +57,6 @@ describe("WidgetEditor filter-value picker", () => {
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent("Loading more");
-
-    rerender(
-      <WidgetCatalogPaginationControl
-        pickerCategory="custom_attribute"
-        hasNextPage
-        isFetchingNextPage={false}
-        onLoadMore={fetchNextPage}
-      />,
-    );
-    expect(
-      screen.queryByRole("button", { name: "Load more" }),
-    ).not.toBeInTheDocument();
   });
 
   it("advances both All-category cursors through one single-flight action", () => {
@@ -98,24 +86,19 @@ describe("WidgetEditor filter-value picker", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Loading more");
   });
 
-  it("advances only the trace-attribute cursor in its category", () => {
+  it("advances the unified catalog cursor in the trace-attribute category", () => {
     const fetchNextPage = vi.fn();
-    const fetchNextAttributePage = vi.fn(() => new Promise(() => {}));
     render(
       <WidgetCatalogPaginationControl
         pickerCategory="custom_attribute"
         hasNextPage
         isFetchingNextPage={false}
         onLoadMore={fetchNextPage}
-        attributeHasNextPage
-        isFetchingAttributeNextPage={false}
-        onLoadMoreAttributes={fetchNextAttributePage}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-    expect(fetchNextPage).not.toHaveBeenCalled();
-    expect(fetchNextAttributePage).toHaveBeenCalledOnce();
+    expect(fetchNextPage).toHaveBeenCalledOnce();
   });
 
   it("offers only properties supported by the selected widget adapters", () => {
@@ -631,7 +614,7 @@ describe("WidgetEditor filter-value picker", () => {
     ).toBe(false);
   });
 
-  it("keeps every finite category off the capped custom-attribute catalog", () => {
+  it("uses one 20-item unified catalog for every property category", () => {
     expect(
       getWidgetMetricCatalogRequest({
         pickerCategory: "all",
@@ -642,6 +625,7 @@ describe("WidgetEditor filter-value picker", () => {
       expect.objectContaining({
         enabled: true,
         excludeCustomAttributes: true,
+        pageSize: 20,
       }),
     );
     expect(
@@ -654,6 +638,7 @@ describe("WidgetEditor filter-value picker", () => {
       expect.objectContaining({
         enabled: true,
         excludeCustomAttributes: true,
+        pageSize: 20,
       }),
     );
     expect(
@@ -664,8 +649,9 @@ describe("WidgetEditor filter-value picker", () => {
       }),
     ).toEqual(
       expect.objectContaining({
-        enabled: false,
+        enabled: true,
         excludeCustomAttributes: true,
+        pageSize: 20,
       }),
     );
   });

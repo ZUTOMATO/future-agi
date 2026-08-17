@@ -102,6 +102,12 @@ def _conflict_row(**overrides):
         "activation_anchor_conflicts": 0,
         "binding_conflicts": 0,
         "definition_conflicts": 0,
+        "catalog_count_all": 2,
+        "catalog_count_system_metric": 0,
+        "catalog_count_eval_metric": 0,
+        "catalog_count_annotation_metric": 0,
+        "catalog_count_custom_attribute": 2,
+        "catalog_count_custom_column": 0,
     }
     row.update(overrides)
     return row
@@ -184,6 +190,15 @@ def test_catalog_reader_returns_signed_keyset_page(settings):
     assert page.next_cursor
     assert page.total is None
     assert page.total_is_exact is False
+    assert page.category_counts == {
+        "all": 2,
+        "system_metric": 0,
+        "eval_metric": 0,
+        "annotation_metric": 0,
+        "custom_attribute": 2,
+        "custom_column": 0,
+    }
+    assert page.category_counts_exact is True
     assert len(executor.calls) == 3
     assert executor.calls[0]["params"]["catalog_exact_activation"] == 0
     assert executor.calls[1]["settings"]["max_result_rows"] == 1
@@ -197,12 +212,51 @@ def test_catalog_reader_returns_signed_keyset_page(settings):
     )
     assert executor.calls[2]["params"]["catalog_lineage_anchor_revision"] == 1
     assert "AS binding_variants" in executor.calls[1]["query"]
+    assert "AS catalog_count_custom_attribute" in executor.calls[1]["query"]
     assert "state_variants != 1 OR binding_variants != 1" in executor.calls[1]["query"]
     assert "uniqExact(tuple(" in executor.calls[1]["query"]
     assert (
         "`th7247_catalog_dev_test`.`property_definition_catalog`"
         in executor.calls[2]["query"]
     )
+
+
+def test_catalog_reader_rejects_inconsistent_category_counts(settings):
+    settings.SECRET_KEY = "property-reader-secret"
+    executor = FakeExecutor(
+        [
+            [_activation_row()],
+            [_conflict_row(catalog_count_all=3)],
+        ]
+    )
+
+    with pytest.raises(PropertyCatalogUnavailable) as exc_info:
+        PropertyCatalogReader(
+            executor, catalog_database="th7247_catalog_dev_test"
+        ).read_page(scope=_scope(), query=QUERY, page_size=20)
+
+    assert exc_info.value.reason == "category_count_mismatch"
+    assert len(executor.calls) == 2
+
+
+def test_span_catalog_includes_trace_defined_attributes(settings):
+    settings.SECRET_KEY = "property-reader-secret"
+    executor = FakeExecutor(
+        [
+            [_activation_row()],
+            [_conflict_row()],
+            [],
+        ]
+    )
+
+    PropertyCatalogReader(
+        executor, catalog_database="th7247_catalog_dev_test"
+    ).read_page(scope=_scope(), query={**QUERY, "source": "spans"}, page_size=20)
+
+    for call in executor.calls[1:]:
+        assert "%(catalog_source)s = 'spans'" in call["query"]
+        assert "primary_source = 'traces'" in call["query"]
+        assert call["params"]["catalog_source"] == "spans"
 
 
 def test_catalog_reader_prefers_new_epoch_when_activation_sequences_restart(settings):

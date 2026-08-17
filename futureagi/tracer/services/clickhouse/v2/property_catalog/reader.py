@@ -107,6 +107,8 @@ class PropertyCatalogPage:
     activation_fingerprint: str
     total: None = None
     total_is_exact: bool = False
+    category_counts: dict[str, int] | None = None
+    category_counts_exact: bool = False
 
 
 @dataclass(slots=True)
@@ -425,6 +427,50 @@ WITH lineage_versioned AS
 
 
 _CONFLICT_SQL_SUFFIX = """
+, catalog_counts AS
+(
+    SELECT
+        count() AS count_all,
+        countIf(category = 'system_metric') AS count_system_metric,
+        countIf(category = 'eval_metric') AS count_eval_metric,
+        countIf(category = 'annotation_metric') AS count_annotation_metric,
+        countIf(category = 'custom_attribute') AS count_custom_attribute,
+        countIf(category = 'custom_column') AS count_custom_column
+    FROM resolved_properties
+    WHERE definition_variants = 1
+      AND (
+          %(catalog_source)s = ''
+          OR primary_source = %(catalog_source)s
+          OR has(source_tokens, %(catalog_source)s)
+          OR (
+              %(catalog_source)s = 'spans'
+              AND (
+                  primary_source = 'traces'
+                  OR has(source_tokens, 'traces')
+              )
+          )
+      )
+      AND (
+          %(catalog_property_kind)s = ''
+          OR property_kind = %(catalog_property_kind)s
+      )
+      AND (
+          property_kind NOT IN ('eval_config', 'eval_template')
+          OR source_adapter = 'simulation_eval_config'
+          OR (
+              %(catalog_per_eval_config)s = 1
+              AND property_kind = 'eval_config'
+          )
+          OR (
+              %(catalog_per_eval_config)s = 0
+              AND property_kind = 'eval_template'
+          )
+      )
+      AND (
+          %(catalog_search)s = ''
+          OR position(search_text_folded, %(catalog_search)s) > 0
+      )
+)
 SELECT
     (
         SELECT count()
@@ -468,7 +514,17 @@ SELECT
         SELECT count()
         FROM resolved_properties
         WHERE definition_variants != 1
-    ) AS definition_conflicts
+    ) AS definition_conflicts,
+    (SELECT count_all FROM catalog_counts) AS catalog_count_all,
+    (SELECT count_system_metric FROM catalog_counts)
+        AS catalog_count_system_metric,
+    (SELECT count_eval_metric FROM catalog_counts) AS catalog_count_eval_metric,
+    (SELECT count_annotation_metric FROM catalog_counts)
+        AS catalog_count_annotation_metric,
+    (SELECT count_custom_attribute FROM catalog_counts)
+        AS catalog_count_custom_attribute,
+    (SELECT count_custom_column FROM catalog_counts)
+        AS catalog_count_custom_column
 """
 
 
@@ -498,6 +554,13 @@ WHERE definition_variants = 1
       %(catalog_source)s = ''
       OR primary_source = %(catalog_source)s
       OR has(source_tokens, %(catalog_source)s)
+      OR (
+          %(catalog_source)s = 'spans'
+          AND (
+              primary_source = 'traces'
+              OR has(source_tokens, 'traces')
+          )
+      )
   )
   AND (
       %(catalog_property_kind)s = ''
@@ -712,6 +775,36 @@ class PropertyCatalogReader:
         ):
             raise PropertyCatalogUnavailable("definition_conflict")
 
+        category_counts = {
+            "all": _strict_uint(
+                conflicts.get("catalog_count_all"), "catalog_count_all"
+            ),
+            "system_metric": _strict_uint(
+                conflicts.get("catalog_count_system_metric"),
+                "catalog_count_system_metric",
+            ),
+            "eval_metric": _strict_uint(
+                conflicts.get("catalog_count_eval_metric"),
+                "catalog_count_eval_metric",
+            ),
+            "annotation_metric": _strict_uint(
+                conflicts.get("catalog_count_annotation_metric"),
+                "catalog_count_annotation_metric",
+            ),
+            "custom_attribute": _strict_uint(
+                conflicts.get("catalog_count_custom_attribute"),
+                "catalog_count_custom_attribute",
+            ),
+            "custom_column": _strict_uint(
+                conflicts.get("catalog_count_custom_column"),
+                "catalog_count_custom_column",
+            ),
+        }
+        if category_counts["all"] != sum(
+            count for category, count in category_counts.items() if category != "all"
+        ):
+            raise PropertyCatalogUnavailable("category_count_mismatch")
+
         rows = self._execute(
             self._page_sql,
             params,
@@ -744,6 +837,8 @@ class PropertyCatalogReader:
             catalog_epoch=activation.catalog_epoch,
             catalog_revision=activation.catalog_revision,
             activation_fingerprint=activation.activation_sha256,
+            category_counts=category_counts,
+            category_counts_exact=True,
         )
 
     def _activation(

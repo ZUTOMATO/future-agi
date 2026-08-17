@@ -53,6 +53,50 @@ const DASHBOARD_KEYS = {
 };
 
 const PROPERTY_CATALOG_CURSOR_STOPPED_KEY = "__propertyCatalogCursorStopped";
+const PROPERTY_CATALOG_COUNT_KEYS = [
+  "all",
+  "system_metric",
+  "eval_metric",
+  "annotation_metric",
+  "custom_attribute",
+  "custom_column",
+];
+
+const validPropertyCatalogCategoryCounts = (page) => {
+  const hasCounts = Object.prototype.hasOwnProperty.call(
+    page || {},
+    "category_counts",
+  );
+  const hasExactFlag = Object.prototype.hasOwnProperty.call(
+    page || {},
+    "category_counts_exact",
+  );
+  // Keep rolling deploys safe: an older activated-catalog response has
+  // neither field. Once either field is present, require the complete exact
+  // contract so a partial response cannot masquerade as trustworthy counts.
+  if (!hasCounts && !hasExactFlag) return true;
+  if (!hasCounts || !hasExactFlag) return false;
+  const counts = page?.category_counts;
+  if (
+    page?.category_counts_exact !== true ||
+    !counts ||
+    typeof counts !== "object" ||
+    Array.isArray(counts) ||
+    Object.keys(counts).length !== PROPERTY_CATALOG_COUNT_KEYS.length ||
+    !PROPERTY_CATALOG_COUNT_KEYS.every(
+      (key) => Number.isSafeInteger(counts[key]) && counts[key] >= 0,
+    )
+  ) {
+    return false;
+  }
+  return (
+    counts.all ===
+    PROPERTY_CATALOG_COUNT_KEYS.slice(1).reduce(
+      (total, key) => total + counts[key],
+      0,
+    )
+  );
+};
 
 /**
  * The legacy definition readers are a rollout compatibility path, not a
@@ -106,7 +150,8 @@ export const validatePropertyCatalogPage = (
     !/^[0-9a-f]{64}$/.test(page.activation_fingerprint || "") ||
     !Array.isArray(page.metrics) ||
     page.total !== null ||
-    page.total_is_exact !== false
+    page.total_is_exact !== false ||
+    !validPropertyCatalogCategoryCounts(page)
   ) {
     return stopPropertyCatalogCursor(page, "malformed_page");
   }
@@ -507,6 +552,16 @@ export function usePropertyCatalog({
   ) {
     chainFailureReason ||= "activation_mismatch";
   }
+  if (
+    baselinePage &&
+    checkedPages.some(
+      (page) =>
+        JSON.stringify(page.category_counts) !==
+        JSON.stringify(baselinePage.category_counts),
+    )
+  ) {
+    chainFailureReason ||= "category_count_mismatch";
+  }
   let duplicateProperty = false;
   let definitionConflict = false;
   const definitionsById = new Map();
@@ -543,6 +598,11 @@ export function usePropertyCatalog({
     metrics,
     total: null,
     totalIsExact: false,
+    categoryCounts: cursorChainStopped
+      ? null
+      : baselinePage?.category_counts || null,
+    categoryCountsExact:
+      !cursorChainStopped && baselinePage?.category_counts_exact === true,
     cursorChainStopped,
     cursorStopReason: chainFailureReason,
     legacyFallbackRequired,

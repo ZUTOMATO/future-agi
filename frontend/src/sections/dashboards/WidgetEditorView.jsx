@@ -385,12 +385,12 @@ export function getWidgetMetricCatalogRequest({
     search: activeCategory?.nameFilter
       ? search || activeCategory.nameFilter
       : search,
-    pageSize: 50,
-    // Custom attributes are supplied exclusively by the retained cursor
-    // inventory. No finite catalog category should trigger the legacy capped
-    // ClickHouse attribute scan before the backend applies its category filter.
+    pageSize: 20,
+    // Only the legacy fallback reads this flag. The activated catalog always
+    // includes custom attributes; the fallback must never rescan the large
+    // source attribute maps while the catalog is unavailable.
     excludeCustomAttributes: true,
-    enabled: pickerOpen && pickerCategory !== "custom_attribute",
+    enabled: pickerOpen,
   };
 }
 
@@ -405,8 +405,7 @@ export function WidgetCatalogPaginationControl({
 }) {
   const activeRequestRef = useRef(null);
   const [isRequestPending, setIsRequestPending] = useState(false);
-  const catalogPageAvailable =
-    pickerCategory !== "custom_attribute" && hasNextPage;
+  const catalogPageAvailable = hasNextPage;
   const attributePageAvailable =
     (pickerCategory === "all" || pickerCategory === "custom_attribute") &&
     attributeHasNextPage;
@@ -2016,12 +2015,13 @@ export default function WidgetEditorView() {
     return [...keys];
   }, [breakdowns, filters, metrics]);
 
-  const cursorAttributePickerActive =
-    pickerOpen &&
-    (pickerCategory === "all" || pickerCategory === "custom_attribute");
+  // The activated property catalog now owns trace attributes as well as the
+  // other property families. Keep the retained inventory hook mounted but
+  // disabled for rollout compatibility; the picker must have one cursor and
+  // one Load more action.
+  const cursorAttributePickerActive = false;
   const {
     filteredAttributes: cursorAttributes,
-    isLoading: isCursorAttributeLoading,
     inventoryControlProps: cursorAttributeControlProps,
   } = useCursorAttributeInventory({
     workspaceScope: true,
@@ -2062,14 +2062,13 @@ export default function WidgetEditorView() {
   const useLegacyMetricCatalog = propertyCatalog.legacyFallbackRequired;
   const paginatedMetrics = useLegacyMetricCatalog
     ? legacyMetricCatalog.metrics
-    : propertyCatalog.metrics.filter(
-        (metric) =>
-          metric.category !== "custom_attribute" &&
-          metric.category !== "customAttribute",
-      );
+    : propertyCatalog.metrics;
+  const catalogCountKey = widgetCatalogRequest.category || "all";
   const paginatedTotal = useLegacyMetricCatalog
     ? legacyMetricCatalog.total
-    : null;
+    : propertyCatalog.categoryCountsExact
+      ? propertyCatalog.categoryCounts?.[catalogCountKey]
+      : null;
   const fetchNextPage = useLegacyMetricCatalog
     ? legacyMetricCatalog.fetchNextPage
     : propertyCatalog.fetchNextPage;
@@ -2138,9 +2137,7 @@ export default function WidgetEditorView() {
     [catalogMetricOptions, cursorAttributeOptions, cursorAttributePickerActive],
   );
 
-  const isPickerInventoryLoading =
-    isPaginatedLoading ||
-    (cursorAttributePickerActive && isCursorAttributeLoading);
+  const isPickerInventoryLoading = isPaginatedLoading;
 
   // Chart tab — axis config
   const [axisConfig, setAxisConfig] = useState({
@@ -7220,7 +7217,8 @@ export default function WidgetEditorView() {
                     </InputAdornment>
                   ),
                   endAdornment:
-                    !cursorAttributePickerActive && paginatedTotal > 0 ? (
+                    !cursorAttributePickerActive &&
+                    Number.isSafeInteger(paginatedTotal) ? (
                       <InputAdornment position="end">
                         <Typography
                           variant="caption"

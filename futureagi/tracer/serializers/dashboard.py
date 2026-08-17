@@ -691,6 +691,11 @@ class DashboardMetricsCatalogResultSerializer(serializers.Serializer):
     # catalog filter or pagination query parameter selects the bounded shape.
     total = serializers.IntegerField(min_value=0, required=False, allow_null=True)
     total_is_exact = serializers.BooleanField(required=False)
+    category_counts = serializers.DictField(
+        child=serializers.IntegerField(min_value=0),
+        required=False,
+    )
+    category_counts_exact = serializers.BooleanField(required=False)
     page = serializers.IntegerField(min_value=1, required=False)
     page_size = serializers.IntegerField(min_value=1, max_value=200, required=False)
     has_more = serializers.BooleanField(required=False)

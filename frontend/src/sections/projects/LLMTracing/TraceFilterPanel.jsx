@@ -1234,6 +1234,8 @@ export function useTraceFilterProperties(
   return {
     ...catalog,
     data: buildTraceFilterProperties(metrics, { isSimulator, sourceScope }),
+    categoryCounts: catalog.categoryCounts,
+    categoryCountsExact: catalog.categoryCountsExact,
     isLoading: catalog.isLoading || catalogNotReady,
     isError: catalogError,
     error: catalogError ? catalog.error : null,
@@ -1419,6 +1421,8 @@ function PropertyPicker({
   isFetchingNextCatalogPage = false,
   catalogNextPageError = false,
   loadNextCatalogPage,
+  catalogCategoryCounts = null,
+  catalogCategoryCountsExact = false,
 }) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
@@ -1530,6 +1534,14 @@ function PropertyPicker({
     const c = { all: propertiesWithExactAttribute.length };
     for (const p of propertiesWithExactAttribute)
       c[p.category] = (c[p.category] || 0) + 1;
+    if (!search.trim() && catalogCategoryCountsExact && catalogCategoryCounts) {
+      c.all = catalogCategoryCounts.all;
+      c.system = catalogCategoryCounts.system_metric;
+      c.eval = catalogCategoryCounts.eval_metric;
+      c.annotation = catalogCategoryCounts.annotation_metric;
+      c.attribute = catalogCategoryCounts.custom_attribute;
+      return c;
+    }
     const exactLookupOwnsAttributeInventory =
       enableExactAttributeLookup && (source === "traces" || source === "spans");
     if (exactLookupOwnsAttributeInventory) {
@@ -1551,9 +1563,12 @@ function PropertyPicker({
     }
     return c;
   }, [
+    catalogCategoryCounts,
+    catalogCategoryCountsExact,
     enableExactAttributeLookup,
     exactAttributeTotalCount,
     propertiesWithExactAttribute,
+    search,
     source,
   ]);
   const visibleProperties = filtered.slice(0, visiblePropertyLimit);
@@ -1761,13 +1776,15 @@ function PropertyPicker({
                     />
                   </InputAdornment>
                 ),
-                endAdornment: filtered.length > 0 && (
+                endAdornment: Number.isSafeInteger(
+                  search.trim() ? filtered.length : counts.all,
+                ) && (
                   <InputAdornment position="end">
                     <Typography
                       variant="caption"
                       sx={{ color: "text.disabled", fontSize: 11 }}
                     >
-                      {filtered.length}
+                      {search.trim() ? filtered.length : counts.all}
                     </Typography>
                   </InputAdornment>
                 ),
@@ -2923,6 +2940,8 @@ function FilterRow({
   isFetchingNextCatalogPage = false,
   catalogNextPageError = false,
   loadNextCatalogPage,
+  catalogCategoryCounts,
+  catalogCategoryCountsExact,
   attributeSource,
 }) {
   const [pickerAnchor, setPickerAnchor] = useState(null);
@@ -3397,6 +3416,8 @@ function FilterRow({
         isFetchingNextCatalogPage={isFetchingNextCatalogPage}
         catalogNextPageError={catalogNextPageError}
         loadNextCatalogPage={loadNextCatalogPage}
+        catalogCategoryCounts={catalogCategoryCounts}
+        catalogCategoryCountsExact={catalogCategoryCountsExact}
       />
 
       <Select
@@ -3509,6 +3530,8 @@ const TraceFilterPanel = ({
     fetchNextPage: fetchNextDynamicPropsPage,
     isFetchingNextPage: isFetchingNextDynamicPropsPage,
     isFetchNextPageError: isNextDynamicPropsPageError,
+    categoryCounts: dynamicPropertyCategoryCounts,
+    categoryCountsExact: dynamicPropertyCategoryCountsExact,
   } = useTraceFilterProperties(observeId, {
     enabled: !skipDynamicProperties,
     isSimulator,
@@ -4301,6 +4324,10 @@ const TraceFilterPanel = ({
                   isFetchingNextCatalogPage={isFetchingNextDynamicPropsPage}
                   catalogNextPageError={isNextDynamicPropsPageError}
                   loadNextCatalogPage={fetchNextDynamicPropsPage}
+                  catalogCategoryCounts={dynamicPropertyCategoryCounts}
+                  catalogCategoryCountsExact={
+                    dynamicPropertyCategoryCountsExact
+                  }
                   attributeSource={exactAttributeSource}
                 />
               ))}

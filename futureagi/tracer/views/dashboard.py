@@ -3102,6 +3102,8 @@ class DashboardViewSet(BaseModelViewSetMixin, ModelViewSet):
                     "metrics": list(catalog_page.metrics),
                     "total": None,
                     "total_is_exact": False,
+                    "category_counts": catalog_page.category_counts,
+                    "category_counts_exact": catalog_page.category_counts_exact,
                     "page_size": query_params["page_size"],
                     "has_more": catalog_page.has_more,
                     "next_cursor": catalog_page.next_cursor,

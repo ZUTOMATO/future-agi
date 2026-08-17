@@ -1024,6 +1024,57 @@ describe("voice-call property search aliases", () => {
     document.body.removeChild(anchorEl);
   });
 
+  it("renders the exact project-scoped category breakdown from the catalog", () => {
+    propertyCatalogMock.mockReturnValue({
+      metrics: [],
+      categoryCounts: {
+        all: 333,
+        system_metric: 111,
+        eval_metric: 22,
+        annotation_metric: 10,
+        custom_attribute: 190,
+        custom_column: 0,
+      },
+      categoryCountsExact: true,
+      legacyFallbackRequired: false,
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      isSuccess: true,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      isFetchNextPageError: false,
+      cursorChainStopped: false,
+      fetchNextPage: vi.fn(),
+      data: { pages: [] },
+    });
+    const { anchorEl } = renderPanel({
+      projectId: "project-exact-counts",
+      source: "traces",
+      tab: "trace",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Property" }));
+
+    expect(screen.getByLabelText("All property count")).toHaveTextContent(
+      "333",
+    );
+    expect(screen.getByLabelText("System property count")).toHaveTextContent(
+      "111",
+    );
+    expect(screen.getByLabelText("Evals property count")).toHaveTextContent(
+      "22",
+    );
+    expect(
+      screen.getByLabelText("Annotations property count"),
+    ).toHaveTextContent("10");
+    expect(
+      screen.getByLabelText("Attributes property count"),
+    ).toHaveTextContent("190");
+    document.body.removeChild(anchorEl);
+  });
+
   it("resets a browsed category when property search starts", () => {
     const { anchorEl } = renderPanel({
       properties: [

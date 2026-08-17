@@ -296,6 +296,15 @@ describe("usePropertyCatalog", () => {
     ],
     total: null,
     total_is_exact: false,
+    category_counts: {
+      all: 1,
+      system_metric: 0,
+      eval_metric: 0,
+      annotation_metric: 0,
+      custom_attribute: 1,
+      custom_column: 0,
+    },
+    category_counts_exact: true,
     page_size: 50,
     has_more: false,
     next_cursor: null,
@@ -361,6 +370,15 @@ describe("usePropertyCatalog", () => {
     ]);
     expect(result.current.total).toBeNull();
     expect(result.current.totalIsExact).toBe(false);
+    expect(result.current.categoryCounts).toEqual({
+      all: 1,
+      system_metric: 0,
+      eval_metric: 0,
+      annotation_metric: 0,
+      custom_attribute: 1,
+      custom_column: 0,
+    });
+    expect(result.current.categoryCountsExact).toBe(true);
     expect(result.current.cursorChainStopped).toBe(false);
   });
 
@@ -429,6 +447,22 @@ describe("usePropertyCatalog", () => {
     expect(degraded.__propertyCatalogCursorStopped).toBe("malformed_page");
   });
 
+  it("accepts a pre-count activated page during a rolling backend deploy", () => {
+    const preCountPage = page();
+    delete preCountPage.category_counts;
+    delete preCountPage.category_counts_exact;
+
+    expect(
+      validatePropertyCatalogPage(preCountPage).__propertyCatalogCursorStopped,
+    ).toBeUndefined();
+
+    const partialCountPage = { ...preCountPage, category_counts_exact: true };
+    expect(
+      validatePropertyCatalogPage(partialCountPage)
+        .__propertyCatalogCursorStopped,
+    ).toBe("malformed_page");
+  });
+
   it("suppresses every definition when an activation changes mid-chain", async () => {
     mocks.get
       .mockResolvedValueOnce({
@@ -465,6 +499,43 @@ describe("usePropertyCatalog", () => {
     expect(result.current.metrics).toEqual([]);
     expect(result.current.hasNextPage).toBe(false);
     expect(result.current.queryReadState).toBe("degraded");
+  });
+
+  it("suppresses a cursor chain when exact category counts change", async () => {
+    mocks.get
+      .mockResolvedValueOnce({
+        data: { result: page({ has_more: true, next_cursor: "cursor-2" }) },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          result: page({
+            category_counts: {
+              all: 2,
+              system_metric: 0,
+              eval_metric: 0,
+              annotation_metric: 0,
+              custom_attribute: 2,
+              custom_column: 0,
+            },
+          }),
+        },
+      });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { result } = renderHook(() => usePropertyCatalog(), {
+      wrapper: createQueryWrapper(queryClient),
+    });
+
+    await waitFor(() => expect(result.current.hasNextPage).toBe(true));
+    await act(() => result.current.fetchNextPage());
+    await waitFor(() =>
+      expect(result.current.cursorStopReason).toBe("category_count_mismatch"),
+    );
+
+    expect(result.current.metrics).toEqual([]);
+    expect(result.current.categoryCounts).toBeNull();
+    expect(result.current.categoryCountsExact).toBe(false);
   });
 
   it("suppresses every definition when one property id conflicts", async () => {

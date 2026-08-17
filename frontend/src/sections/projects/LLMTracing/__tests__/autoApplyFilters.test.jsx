@@ -12,13 +12,34 @@ vi.mock("src/hooks/use-ai-filter", () => ({
   useAIFilter: () => ({ parseQuery: vi.fn(), loading: false, error: null }),
 }));
 
-vi.mock("src/hooks/useDashboards", () => ({
-  useDashboardFilterValues: () => ({
-    data: [],
-    isLoading: false,
-    isError: false,
-  }),
-}));
+vi.mock("src/hooks/useDashboards", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    useDashboardFilterValues: () => ({
+      data: [],
+      isLoading: false,
+      isError: false,
+    }),
+    usePropertyCatalog: () => ({
+      metrics: [],
+      legacyFallbackRequired: false,
+      queryReadState: "complete",
+      isFetching: false,
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      error: null,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      isFetchingNextPage: false,
+      isFetchNextPageError: false,
+      cursorChainStopped: false,
+      data: { pages: [] },
+    }),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // hasIncompleteNumericRow — the gate that holds auto-apply while a numeric row

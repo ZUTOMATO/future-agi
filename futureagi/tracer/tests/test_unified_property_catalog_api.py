@@ -143,6 +143,15 @@ def test_metrics_cursor_mode_uses_one_activated_definition_reader(settings):
         catalog_epoch=3,
         catalog_revision=17,
         activation_fingerprint="a" * 64,
+        category_counts={
+            "all": 1,
+            "system_metric": 0,
+            "eval_metric": 0,
+            "annotation_metric": 0,
+            "custom_attribute": 1,
+            "custom_column": 0,
+        },
+        category_counts_exact=True,
     )
     reader = Mock()
     reader.read_page.return_value = page
@@ -165,6 +174,15 @@ def test_metrics_cursor_mode_uses_one_activated_definition_reader(settings):
     assert result["metrics"][0]["property_id"] == ("custom_attribute:customer.plan")
     assert result["total"] is None
     assert result["total_is_exact"] is False
+    assert result["category_counts"] == {
+        "all": 1,
+        "system_metric": 0,
+        "eval_metric": 0,
+        "annotation_metric": 0,
+        "custom_attribute": 1,
+        "custom_column": 0,
+    }
+    assert result["category_counts_exact"] is True
     assert result["has_more"] is True
     assert result["next_cursor"] == "signed-next"
     assert result["catalog_revision"] == 17
