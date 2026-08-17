@@ -120,6 +120,7 @@ import {
 import {
   getWidgetEditorLoadState,
   getWidgetPreviewState,
+  shouldBlockWidgetPreviewForFailure,
   WIDGET_PREVIEW_MAX_WAIT_MS,
 } from "./widgetEditorState";
 
@@ -3655,6 +3656,10 @@ export default function WidgetEditorView() {
       isPreviewRefreshing ||
       serverPreviewState === "preparing");
   const previewActivity = previewPreparing && !activeExactPreview;
+  const previewFailureBlocksRendering = shouldBlockWidgetPreviewForFailure({
+    previewFailed,
+    hasExactPreview: Boolean(activeExactPreview),
+  });
 
   useEffect(() => {
     if (!previewActivity) return undefined;
@@ -4277,7 +4282,7 @@ export default function WidgetEditorView() {
                 />
               </Box>
             )}
-            {isHorizontal && previewFailed && (
+            {isHorizontal && previewFailureBlocksRendering && (
               <Box sx={{ p: 2 }}>
                 <WidgetPreviewStatus state="failed" onRetry={retryPreview} />
               </Box>
@@ -4285,7 +4290,7 @@ export default function WidgetEditorView() {
             {isHorizontal &&
               !previewLoading &&
               !previewPreparing &&
-              !previewFailed &&
+              !previewFailureBlocksRendering &&
               previewSeries.length === 0 && (
                 <Box
                   sx={{
@@ -4304,7 +4309,7 @@ export default function WidgetEditorView() {
             previewSeries.length > 0 &&
             !previewLoading &&
             !previewPreparing &&
-            !previewFailed
+            !previewFailureBlocksRendering
               ? (() => {
                   const maxVal = Math.max(
                     ...barData.series[0].data.map(Math.abs),
@@ -4679,7 +4684,7 @@ export default function WidgetEditorView() {
                   <WidgetPreviewStatus
                     state={previewPreparing ? "preparing" : "loading"}
                   />
-                ) : previewFailed ? (
+                ) : previewFailureBlocksRendering ? (
                   <WidgetPreviewStatus state="failed" onRetry={retryPreview} />
                 ) : previewSeries.length > 0 ? (
                   <Box sx={{ width: "100%", height: "100%" }}>
