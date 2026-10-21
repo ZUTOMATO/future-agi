@@ -187,8 +187,7 @@ class TestAddItemsEnumeratedRegression:
     ):
         """A repeated (source_type, id) in ONE payload creates a single row — the batch
         resolve-then-create path dedupes within the payload (the old per-item .exists()
-        only caught ids already committed, so two copies in one request slipped through).
-        """
+        only caught ids already committed, so two copies in one request slipped through)."""
         t = Trace.objects.create(project=observe_project, name="t-dedupe")
         _seed_ch_trace_root(t)
         resp = auth_client.post(
@@ -1508,6 +1507,7 @@ def seeded_mixed_call_executions(db, organization, workspace):
         scenario=scen,
         status="failed",
         duration_seconds=30,
+        cost_cents=56,
         avg_agent_latency_ms=500,
         response_time_ms=2750,
         row_id=failed_row.id,
@@ -1558,12 +1558,14 @@ class TestAddItemsFilterModeCallExecutionRichFilters:
             "is_not_null",
             (0, 2),
         ),
-        ("cost_is_null_when_both_fields_are_null", "cost_cents", "is_null", (2,)),
+        # Each row sets one cost field and leaves the other null. A row counts
+        # as null only when both fields are, so is_null matches no row here.
+        ("cost_is_null_only_when_both_fields_are_null", "cost_cents", "is_null", ()),
         (
             "cost_is_not_null_when_either_field_is_set",
             "cost_cents",
             "is_not_null",
-            (0, 1),
+            (0, 1, 2),
         ),
         ("response_time_is_null", "responseTime", "is_null", (1,)),
         (
